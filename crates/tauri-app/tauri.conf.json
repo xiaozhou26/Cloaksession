@@ -7,7 +7,7 @@
     "beforeDevCommand": "npm run dev --prefix D:\\Rust\\multizen-browser-rs\\crates\\tauri-app\\ui",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "npm run build --prefix D:\\Rust\\multizen-browser-rs\\crates\\tauri-app\\ui",
-    "frontendDist": "../ui/dist"
+    "frontendDist": "ui/dist"
   },
   "app": {
     "windows": [
@@ -20,6 +20,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "icon": [
+      "icons/icon.ico",
+      "icons/128x128.png",
+      "icons/icon.png"
+    ]
   }
 }
