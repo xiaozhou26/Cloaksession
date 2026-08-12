@@ -62,9 +62,9 @@ pub struct ClientHints {
     pub sec_ch_ua: String,
     pub sec_ch_ua_platform: String,
     pub sec_ch_ua_platform_version: String,
-    pub sec_ch_ua_arch: String, // "arm" | "x86"
+    pub sec_ch_ua_arch: String,    // "arm" | "x86"
     pub sec_ch_ua_bitness: String, // "64" | "32"
-    pub sec_ch_ua_mobile: String, // "?0" | "?1"
+    pub sec_ch_ua_mobile: String,  // "?0" | "?1"
     pub sec_ch_ua_model: String,
     pub sec_ch_ua_full_version_list: String,
 }
@@ -153,8 +153,7 @@ pub struct ProfileSummary {
     pub device: Option<DeviceFamily>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct CreateProfileInput {
     pub name: String,
     pub notes: Option<String>,
@@ -163,8 +162,62 @@ pub struct CreateProfileInput {
     pub start_url: Option<String>,
     pub search_provider: Option<String>,
     pub proxy: Option<ProxyConfig>,
+    /// Legacy partial fingerprint patch. Kept for MCP/source compatibility.
     pub fingerprint: Option<PartialFingerprintInput>,
     pub extensions: Option<Vec<ExtensionConfig>>,
+    /// A complete fingerprint supplied by the Tauri UI. This is intentionally
+    /// omitted from the serialized core contract; custom deserialization
+    /// accepts it from the same `fingerprint` JSON field without changing the
+    /// legacy partial API above.
+    pub full_fingerprint: Option<FingerprintConfig>,
+}
+
+impl<'de> Deserialize<'de> for CreateProfileInput {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Wire {
+            name: String,
+            notes: Option<String>,
+            tags: Option<Vec<String>>,
+            icon: Option<String>,
+            start_url: Option<String>,
+            search_provider: Option<String>,
+            proxy: Option<ProxyConfig>,
+            fingerprint: Option<serde_json::Value>,
+            extensions: Option<Vec<ExtensionConfig>>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let (fingerprint, full_fingerprint) = match wire.fingerprint {
+            Some(value) => match serde_json::from_value::<FingerprintConfig>(value.clone()) {
+                Ok(full) => (None, Some(full)),
+                Err(_) => (
+                    serde_json::from_value::<PartialFingerprintInput>(value)
+                        .map(Some)
+                        .map_err(serde::de::Error::custom)?,
+                    None,
+                ),
+            },
+            None => (None, None),
+        };
+
+        Ok(Self {
+            name: wire.name,
+            notes: wire.notes,
+            tags: wire.tags,
+            icon: wire.icon,
+            start_url: wire.start_url,
+            search_provider: wire.search_provider,
+            proxy: wire.proxy,
+            fingerprint,
+            extensions: wire.extensions,
+            full_fingerprint,
+        })
+    }
 }
 
 /// Partial fingerprint patch — all fields optional, merges over existing.

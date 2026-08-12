@@ -114,7 +114,9 @@ impl ProfileManager {
         let data_dir = self.profiles_root.join(&id);
         fs::create_dir_all(&data_dir)?;
 
-        let mut fingerprint = default_fingerprint(&id);
+        let mut fingerprint = input
+            .full_fingerprint
+            .unwrap_or_else(|| default_fingerprint(&id));
         if let Some(patch) = input.fingerprint {
             if let Some(v) = patch.user_agent { fingerprint.user_agent = v; }
             if let Some(v) = patch.locale { fingerprint.locale = v; }

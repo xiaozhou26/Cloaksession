@@ -1,6 +1,8 @@
 use multizen_core::{BrowserEngine, FingerprintConfig, Result};
 
-use crate::scripts::{build_fingerprint_preload_script, build_webrtc_block_script, build_webrtc_spoof_script};
+use crate::scripts::{
+    build_fingerprint_preload_script, build_webrtc_block_script, build_webrtc_spoof_script,
+};
 use crate::session::BrowserSession;
 
 pub async fn bootstrap_targets(
@@ -37,10 +39,29 @@ pub async fn bootstrap_targets(
             // Page.addScriptToEvaluateOnNewDocument
             let _ = page.evaluate(script.as_str()).await;
         }
-        // Fingerprint preload (CFT only)
+        // Fingerprint preload (CFT only). Register it for every future
+        // document and also evaluate it in the current document so the first
+        // already-open tab is updated immediately.
         if engine == BrowserEngine::Cft {
             let preload = build_fingerprint_preload_script(fp);
-            let _ = page.evaluate(preload.as_str()).await;
+            page.evaluate_on_new_document(preload.clone())
+                .await
+                .map_err(|e| {
+                    multizen_core::MultizenError::Cdp(format!("fingerprint preload: {e}"))
+                })?;
+            page.evaluate(preload.as_str()).await.map_err(|e| {
+                multizen_core::MultizenError::Cdp(format!("fingerprint evaluate: {e}"))
+            })?;
+            page.set_user_agent(
+                chromiumoxide::cdp::browser_protocol::network::SetUserAgentOverrideParams {
+                    user_agent: fp.user_agent.clone(),
+                    accept_language: Some(fp.accept_language.clone()),
+                    platform: Some(fp.platform.clone()),
+                    user_agent_metadata: None,
+                },
+            )
+            .await
+            .map_err(|e| multizen_core::MultizenError::Cdp(format!("user agent override: {e}")))?;
         }
         // Locale (both engines)
         let _ = page
@@ -52,14 +73,10 @@ pub async fn bootstrap_targets(
                 .as_str(),
             )
             .await;
-        // UA + UA-CH (CFT only) — via Emulation.setUserAgentOverride
-        if engine == BrowserEngine::Cft {
-            // chromiumoxide Page has set_user_agent via CDP; simplified to evaluate-free
-            // approach using Emulation domain. Implementation note: use
-            // page.execute(EmulationSetUserAgentOverrideCommand) in production.
-            // Here we skip CDP Emulation to keep the integration test simple;
-            // UA override is partially covered by --user-agent flag at launch.
-        }
+        // UA + Accept-Language + platform are applied above via
+        // Emulation.setUserAgentOverride for CFT. Client-hint metadata is not
+        // synthesized here because the Rust config stores serialized header
+        // strings rather than the structured CDP brand/version array.
     }
     Ok(())
 }

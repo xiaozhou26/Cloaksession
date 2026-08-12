@@ -1,5 +1,5 @@
 import { dialog, fingerprint as fingerprintApi, proxy as proxyApi } from "../../lib/ipc";
-import { useEffect, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { AlertTriangle, FolderOpen, MapPin, RefreshCw } from "lucide-react";
 import type {
   DeviceCatalogEntry,
@@ -36,6 +36,9 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
   const [detecting, setDetecting] = useState(false);
   const [detectError, setDetectError] = useState<string | null>(null);
   const [detected, setDetected] = useState<ProxyGeoResult | null>(null);
+  const latestFingerprint = useRef(fingerprint);
+  const reconcileRequest = useRef(0);
+  latestFingerprint.current = fingerprint;
 
   useEffect(() => {
     void fingerprintApi.devices().then(setDevices);
@@ -52,15 +55,17 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
   const currentLocale = locales.find((l) => l.locale === fingerprint.locale);
 
   async function regen(): Promise<void> {
+    const request = ++reconcileRequest.current;
     const next = await fingerprintApi.generate();
-    onChange(next);
+    if (request === reconcileRequest.current) onChange(next);
   }
 
   async function reconcile(
     patch: Parameters<typeof fingerprintApi.reconcile>[1],
   ): Promise<void> {
-    const next = await fingerprintApi.reconcile(fingerprint, patch);
-    onChange(next);
+    const request = ++reconcileRequest.current;
+    const next = await fingerprintApi.reconcile(latestFingerprint.current, patch);
+    if (request === reconcileRequest.current) onChange(next);
   }
 
   async function detectFromProxy(): Promise<void> {
@@ -171,7 +176,13 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
         <Select
           value={currentLocale?.id ?? fingerprint.locale}
           onChange={(v) => void reconcile({ localeId: v })}
-          options={locales.map((l) => ({ value: l.id, label: l.label }))}
+          options={(() => {
+            const options = locales.map((l) => ({ value: l.id, label: l.label }));
+            if (!currentLocale && fingerprint.locale) {
+              options.unshift({ value: fingerprint.locale, label: `${fingerprint.locale} (custom)` });
+            }
+            return options;
+          })()}
         />
       </Field>
 
@@ -212,16 +223,21 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
               screen: { width: Number(m[1]), height: Number(m[2]) },
             });
           }}
-          options={(currentDevice?.screens ?? [
-            {
-              width: fingerprint.screen.width,
-              height: fingerprint.screen.height,
-              label: `${fingerprint.screen.width} × ${fingerprint.screen.height}`,
-            },
-          ]).map((s) => ({
-            value: `${s.width}×${s.height}`,
-            label: s.label,
-          }))}
+          options={(() => {
+            const screens = currentDevice?.screens ?? [];
+            const options = screens.map((s) => ({
+              value: `${s.width}×${s.height}`,
+              label: s.label,
+            }));
+            const currentValue = `${fingerprint.screen.width}×${fingerprint.screen.height}`;
+            if (!options.some((option) => option.value === currentValue)) {
+              options.unshift({
+                value: currentValue,
+                label: `${fingerprint.screen.width} × ${fingerprint.screen.height} (custom)`,
+              });
+            }
+            return options;
+          })()}
         />
       </Field>
 
@@ -239,23 +255,212 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
         {shortUA(fingerprint.userAgent)}
       </div>
 
-      {/* CloakBrowser C++ layer extras. Both map 1:1 to native flags and
-          only take effect under the CloakBrowser engine. */}
-      <Field label="Storage quota (MB)" desc="Pins navigator.storage.estimate(). 0 = engine default.">
+      {/* Direct editors for every persisted value that is not derived by the
+          device/locale reconciliation controls above. Keeping these values in
+          the same object is important: create and edit both round-trip the
+          authoritative Rust FingerprintConfig without shadow state. */}
+      <Field label="User-Agent">
+        <input
+          type="text"
+          value={fingerprint.userAgent}
+          onChange={(e) => onChange({ ...fingerprint, userAgent: e.target.value })}
+          className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
+          style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-2.5">
+        <Field label="Platform">
+          <input
+            type="text"
+            value={fingerprint.platform}
+            onChange={(e) => onChange({ ...fingerprint, platform: e.target.value })}
+            className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
+            style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+          />
+        </Field>
+        <Field label="Country">
+          <input
+            type="text"
+            maxLength={2}
+            value={fingerprint.country}
+            onChange={(e) => onChange({ ...fingerprint, country: e.target.value.toUpperCase() })}
+            className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
+            style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+          />
+        </Field>
+      </div>
+      <Field label="Languages" desc="Comma-separated navigator.languages values.">
+        <input
+          type="text"
+          value={fingerprint.languages.join(", ")}
+          onChange={(e) =>
+            onChange({
+              ...fingerprint,
+              languages: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+            })
+          }
+          className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
+          style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+        />
+      </Field>
+      <Field label="Accept-Language">
+        <input
+          type="text"
+          value={fingerprint.acceptLanguage}
+          onChange={(e) => onChange({ ...fingerprint, acceptLanguage: e.target.value })}
+          className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
+          style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+        />
+      </Field>
+      <div className="grid grid-cols-3 gap-2.5">
+        <Field label="DPR">
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={fingerprint.dpr}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              if (Number.isFinite(value) && value > 0) onChange({ ...fingerprint, dpr: value });
+            }}
+            className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
+            style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+          />
+        </Field>
+        <Field label="Hardware concurrency">
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={fingerprint.hardwareConcurrency}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              if (Number.isInteger(value) && value > 0) {
+                onChange({ ...fingerprint, hardwareConcurrency: value });
+              }
+            }}
+            className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
+            style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+          />
+        </Field>
+        <Field label="Device memory (GB)">
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={fingerprint.deviceMemory}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              if (Number.isInteger(value) && value > 0) {
+                onChange({ ...fingerprint, deviceMemory: value });
+              }
+            }}
+            className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
+            style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+          />
+        </Field>
+      </div>
+      <Field label="Available screen size" desc="Clear both values to omit availScreen.">
+        <div className="grid grid-cols-[1fr_1fr_auto] gap-2.5 items-end">
+          <input
+            type="number"
+            min={1}
+            value={fingerprint.availScreen?.width ?? ""}
+            placeholder="width"
+            onChange={(e) => {
+              const width = Number(e.target.value);
+              if (!Number.isInteger(width) || width <= 0) {
+                if (e.target.value === "") onChange({ ...fingerprint, availScreen: null });
+                return;
+              }
+              onChange({
+                ...fingerprint,
+                availScreen: { width, height: fingerprint.availScreen?.height ?? fingerprint.screen.height },
+              });
+            }}
+            className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
+            style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+          />
+          <input
+            type="number"
+            min={1}
+            value={fingerprint.availScreen?.height ?? ""}
+            placeholder="height"
+            onChange={(e) => {
+              const height = Number(e.target.value);
+              if (!Number.isInteger(height) || height <= 0) {
+                if (e.target.value === "") onChange({ ...fingerprint, availScreen: null });
+                return;
+              }
+              onChange({
+                ...fingerprint,
+                availScreen: { width: fingerprint.availScreen?.width ?? fingerprint.screen.width, height },
+              });
+            }}
+            className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
+            style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+          />
+          {fingerprint.availScreen && (
+            <button type="button" onClick={() => onChange({ ...fingerprint, availScreen: null })} className="h-9 px-2.5 text-[11px] text-slate-400 rounded-lg" style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}>Clear</button>
+          )}
+        </div>
+      </Field>
+      <Field label="WebGL vendor">
+        <input
+          type="text"
+          value={fingerprint.webgl.vendor}
+          onChange={(e) => onChange({ ...fingerprint, webgl: { ...fingerprint.webgl, vendor: e.target.value } })}
+          className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
+          style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+        />
+      </Field>
+      <Field label="WebGL renderer">
+        <input
+          type="text"
+          value={fingerprint.webgl.renderer}
+          onChange={(e) => onChange({ ...fingerprint, webgl: { ...fingerprint.webgl, renderer: e.target.value } })}
+          className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
+          style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+        />
+      </Field>
+      <Field label="Client hints" desc="All values are persisted verbatim and used by the selected browser engine where supported.">
+        <div className="space-y-1.5">
+          {(Object.keys(fingerprint.clientHints) as Array<keyof FingerprintConfig["clientHints"]>).map((key) => (
+            <input
+              key={key}
+              type="text"
+              aria-label={key}
+              value={fingerprint.clientHints[key]}
+              onChange={(e) => onChange({ ...fingerprint, clientHints: { ...fingerprint.clientHints, [key]: e.target.value } })}
+              className="w-full px-2.5 h-8 rounded-lg bg-white/[0.03] text-[11px] text-slate-200 outline-none mono"
+              style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+            />
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Storage quota (MB)" desc="Pins navigator.storage.estimate(). Empty = engine default.">
         <input
           type="number"
           min={0}
           value={
-            fingerprint.storageQuota
-              ? Math.round(fingerprint.storageQuota / (1024 * 1024))
-              : 0
+            fingerprint.storageQuota == null
+              ? ""
+              : fingerprint.storageQuota / 1_000_000
           }
           onChange={(e) => {
-            const mb = Number(e.target.value);
-            onChange({
-              ...fingerprint,
-              storageQuota: mb > 0 ? mb * 1024 * 1024 : undefined,
-            });
+            const value = e.target.value;
+            if (value === "") {
+              onChange({ ...fingerprint, storageQuota: null });
+              return;
+            }
+            const mb = Number(value);
+            if (Number.isFinite(mb) && mb >= 0) {
+              onChange({
+                ...fingerprint,
+                storageQuota: mb > 0 ? Math.round(mb * 1_000_000) : null,
+              });
+            }
           }}
           placeholder="0 (default)"
           className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none"
@@ -273,7 +478,7 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
             onChange={(e) =>
               onChange({
                 ...fingerprint,
-                fontsDir: e.target.value.trim() || undefined,
+                fontsDir: e.target.value === "" ? null : e.target.value,
               })
             }
             placeholder="C:\Windows\Fonts (default)"

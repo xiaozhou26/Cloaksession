@@ -113,6 +113,9 @@ export function ProfileEditSheet({ profile, onSaved }: Props): JSX.Element {
   const timerRef = useRef<number | null>(null);
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
+  // Monotonic request id so an older in-flight persist cannot overwrite the
+  // savedRef/status produced by a newer one that already settled.
+  const persistReqRef = useRef(0);
 
   // Re-initialize when a different profile is opened.
   useEffect(() => {
@@ -124,14 +127,20 @@ export function ProfileEditSheet({ profile, onSaved }: Props): JSX.Element {
   }, [profile]);
 
   async function persist(f: FormState): Promise<void> {
+    const req = ++persistReqRef.current;
     setStatus({ kind: "saving" });
     try {
       await profiles.update(profile.id, toPatch(f));
-      savedRef.current = JSON.stringify(f);
-      setStatus({ kind: "saved" });
-      onSavedRef.current?.();
+      // Only commit if no newer persist superseded this one.
+      if (req === persistReqRef.current) {
+        savedRef.current = JSON.stringify(f);
+        setStatus({ kind: "saved" });
+        onSavedRef.current?.();
+      }
     } catch (e) {
-      setStatus({ kind: "error", message: (e as Error).message });
+      if (req === persistReqRef.current) {
+        setStatus({ kind: "error", message: (e as Error).message });
+      }
     }
   }
 

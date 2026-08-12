@@ -315,7 +315,7 @@ async fn download_installer(
                     return;
                 }
                 received += chunk.len() as u64;
-                let percent = if total > 0 { (received * 100) / total } else { 0 };
+                let percent = received.saturating_mul(100).checked_div(total).unwrap_or(0);
                 set_status(app, &state.update, UpdateStatus::Downloading {
                     version: version.to_string(),
                     received,

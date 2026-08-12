@@ -1,4 +1,4 @@
-use multizen_core::{CreateProfileInput, UpdateProfileInput};
+use multizen_core::{CreateProfileInput, PartialFingerprintInput, UpdateProfileInput};
 use profile_manager::ProfileManager;
 use tempfile::TempDir;
 
@@ -23,12 +23,72 @@ fn create_and_get_profile() {
         proxy: None,
         fingerprint: None,
         extensions: None,
+        full_fingerprint: None,
     };
     let p = mgr.create(input).unwrap();
     assert_eq!(p.name, "test");
     assert_eq!(p.tags, vec!["a".to_string()]);
     let fetched = mgr.get(&p.id).unwrap().unwrap();
     assert_eq!(fetched.id, p.id);
+}
+
+#[test]
+fn create_full_fingerprint_json_round_trips_without_loss() {
+    let (_dir, mgr) = make();
+    let mut expected = profile_manager::fingerprint::default_fingerprint("ui-seed");
+    expected.locale = "ja-JP".into();
+    expected.languages = vec!["ja-JP".into(), "ja".into()];
+    expected.accept_language = "ja-JP,ja;q=0.8".into();
+    expected.screen.width = 2560;
+    expected.avail_screen = None;
+    expected.dpr = 1.25;
+    expected.hardware_concurrency = 12;
+    expected.device_memory = 16;
+    expected.fonts_dir = None;
+    expected.storage_quota = Some(3_210_000_000);
+
+    let expected_value = serde_json::to_value(&expected).unwrap();
+    let input: CreateProfileInput = serde_json::from_value(serde_json::json!({
+        "name": "full",
+        "fingerprint": expected_value.clone(),
+    }))
+    .unwrap();
+    assert!(input.full_fingerprint.is_some());
+    assert!(input.fingerprint.is_none());
+
+    let created = mgr.create(input).unwrap();
+    let fetched = mgr.get(&created.id).unwrap().unwrap();
+    let actual = serde_json::to_value(&fetched.fingerprint).unwrap();
+    assert_eq!(actual, expected_value);
+    assert_eq!(actual["screen"]["width"], 2560);
+    assert_eq!(actual["availScreen"], serde_json::Value::Null);
+    assert_eq!(actual["acceptLanguage"], "ja-JP,ja;q=0.8");
+    assert_eq!(actual["storageQuota"], 3_210_000_000u64);
+}
+
+#[test]
+fn create_legacy_partial_fingerprint_remains_compatible() {
+    let (_dir, mgr) = make();
+    let input: CreateProfileInput = serde_json::from_value(serde_json::json!({
+        "name": "partial",
+        "fingerprint": {
+            "locale": "de-DE",
+            "timezone": "Europe/Berlin",
+            "country": "DE"
+        }
+    }))
+    .unwrap();
+    assert!(input.full_fingerprint.is_none());
+    assert!(matches!(
+        input.fingerprint,
+        Some(PartialFingerprintInput { locale: Some(ref locale), .. }) if locale == "de-DE"
+    ));
+
+    let created = mgr.create(input).unwrap();
+    assert_eq!(created.fingerprint.locale, "de-DE");
+    assert_eq!(created.fingerprint.timezone, "Europe/Berlin");
+    assert_eq!(created.fingerprint.country, "DE");
+    assert_eq!(created.fingerprint.platform, "Win32");
 }
 
 #[test]

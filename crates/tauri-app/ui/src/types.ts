@@ -164,7 +164,8 @@ export interface CreateProfileInput {
   startUrl?: string;
   searchProvider?: string;
   proxy?: ProxyConfig;
-  fingerprint?: PartialFingerprintInput;
+  /** Full UI fingerprint, or the legacy partial MCP-compatible patch. */
+  fingerprint?: FingerprintConfig | PartialFingerprintInput;
   extensions?: ExtensionConfig[];
 }
 

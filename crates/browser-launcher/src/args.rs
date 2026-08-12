@@ -136,7 +136,7 @@ pub fn build_spawn_args(
         "--restore-last-session".to_string(),
         "--disable-features=Translate".to_string(),
         format!("--lang={}", fp.locale),
-        format!("--accept-lang={}", fp.languages.join(",")),
+        format!("--accept-lang={}", fp.accept_language),
         format!("--window-size={},{}", fp.screen.width, fp.screen.height),
     ];
 

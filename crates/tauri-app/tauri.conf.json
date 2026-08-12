@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.cloaksession.browser",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": {"script": "npm run dev", "cwd": "ui"},
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": {"script": "npm run build", "cwd": "ui"},
     "frontendDist": "ui/dist"
   },
   "app": {

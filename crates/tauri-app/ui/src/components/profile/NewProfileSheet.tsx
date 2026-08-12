@@ -67,10 +67,14 @@ export function NewProfileSheet({ onCancel, onCreated, onDirtyChange }: Props): 
   // Parsed tags, used both for the create call and to feed the emoji classifier.
   const tagList = tagsRaw.split(",").map((s) => s.trim()).filter(Boolean);
 
+  const initialFingerprintRef = useRef<string | null>(null);
   // Auto-generate a fingerprint preset on mount so the create call always
   // has one and the regen button has something to replace.
   useEffect(() => {
-    void fingerprintApi.generate().then(setFingerprint);
+    void fingerprintApi.generate().then((generated) => {
+      initialFingerprintRef.current = JSON.stringify(generated);
+      setFingerprint(generated);
+    });
   }, []);
 
   // Track "dirty" — anything the user typed that's not the default. The
@@ -87,12 +91,15 @@ export function NewProfileSheet({ onCancel, onCreated, onDirtyChange }: Props): 
       proxy.host !== "" ||
       proxy.username !== "" ||
       proxy.password !== "" ||
-      extensions.length > 0;
+      extensions.length > 0 ||
+      (fingerprint !== null &&
+        initialFingerprintRef.current !== null &&
+        JSON.stringify(fingerprint) !== initialFingerprintRef.current);
     if (dirty !== dirtyRef.current) {
       dirtyRef.current = dirty;
       onDirtyChange?.(dirty);
     }
-  }, [name, tagsRaw, icon, notes, startUrl, proxy, extensions, onDirtyChange]);
+  }, [name, tagsRaw, icon, notes, startUrl, proxy, extensions, fingerprint, onDirtyChange]);
 
   function buildProxy(): ProxyConfig | undefined {
     if (!proxy.enabled) return undefined;
@@ -119,12 +126,17 @@ export function NewProfileSheet({ onCancel, onCreated, onDirtyChange }: Props): 
       }
     : undefined;
 
-  const canSubmit = name.trim() !== "" && !busy;
+  const canSubmit = name.trim() !== "" && fingerprint !== null && !busy;
 
   async function submit(autoLaunch: boolean): Promise<void> {
     if (!name.trim()) {
       setError("Name is required");
       setSection("general");
+      return;
+    }
+    if (!fingerprint) {
+      setError("Fingerprint preset is still loading");
+      setSection("fingerprint");
       return;
     }
     let built: ProxyConfig | undefined;
@@ -145,7 +157,7 @@ export function NewProfileSheet({ onCancel, onCreated, onDirtyChange }: Props): 
         notes: notes.trim() || undefined,
         startUrl: startUrl.trim() || undefined,
         proxy: built,
-        fingerprint: fingerprint ?? undefined,
+        fingerprint,
         extensions: extensions.length > 0 ? extensions : undefined,
       });
       onCreated(created.id, autoLaunch);

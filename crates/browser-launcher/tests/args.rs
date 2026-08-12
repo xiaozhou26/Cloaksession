@@ -65,7 +65,7 @@ fn base_args_always_present() {
     assert!(args.iter().any(|a| a == "--no-default-browser-check"));
     assert!(args.iter().any(|a| a == "--restore-last-session"));
     assert!(args.iter().any(|a| a == "--lang=en-US"));
-    assert!(args.iter().any(|a| a == "--accept-lang=en-US,en"));
+    assert!(args.iter().any(|a| a == "--accept-lang=en-US,en;q=0.9"));
     assert!(args.iter().any(|a| a == "--window-size=1920,1080"));
 }
 

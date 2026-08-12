@@ -366,6 +366,7 @@ pub async fn create_profile(
             proxy: args.proxy.map(ProxyConfig::from),
             fingerprint: args.fingerprint.map(PartialFingerprintInput::from),
             extensions: None,
+            full_fingerprint: None,
         };
         let profile = pm.create(input)?;
         let fingerprint_summary = serde_json::json!({

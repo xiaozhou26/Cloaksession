@@ -459,10 +459,36 @@ impl BrowserDriver for TauriBrowserDriver {
         // launcher may have already marked the profile opened and stored the
         // handle — propagating the connect error keeps the system state
         // inspectable.
-        if let Err(e) = self
+        let session = match self
             .registry
             .get_or_connect(profile_id, &launched.cdp_endpoint, self.engine)
             .await
+        {
+            Ok(session) => session,
+            Err(e) => {
+                self.emit(
+                    "chromium:status",
+                    &ChromiumStatus {
+                        profile_id: profile_id.to_string(),
+                        status: "failed".into(),
+                        error: Some(e.to_string()),
+                    },
+                );
+                return Err(e);
+            }
+        };
+
+        // Apply CDP bootstrap (fingerprint preload, UA override, locale) so
+        // the persistent fingerprint actually reaches the browser runtime.
+        // Without this the preload script and UA/Accept-Language overrides
+        // defined in cdp-driver were never executed after launch.
+        let profile = self
+            .get_profile(profile_id)
+            .await?
+            .ok_or_else(|| MultizenError::NotFound(profile_id.to_string()))?;
+        if let Err(e) =
+            cdp_driver::bootstrap::bootstrap_targets(session.as_ref(), &profile.fingerprint, self.engine, None)
+                .await
         {
             self.emit(
                 "chromium:status",

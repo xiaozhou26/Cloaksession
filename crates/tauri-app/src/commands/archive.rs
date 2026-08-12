@@ -86,7 +86,10 @@ struct ArchiveManifest {
 
 /// Recursively walk `dir`, collecting relative paths, sizes, and SHA-256
 /// checksums. Returns `(FileMeta list, file contents in the same order)`.
-fn collect_files(dir: &Path) -> Result<(Vec<FileMeta>, Vec<(PathBuf, Vec<u8>)>), String> {
+type CollectedFile = (PathBuf, Vec<u8>);
+type CollectedFiles = (Vec<FileMeta>, Vec<CollectedFile>);
+
+fn collect_files(dir: &Path) -> Result<CollectedFiles, String> {
     let mut metas = Vec::new();
     let mut contents = Vec::new();
     collect_files_inner(dir, dir, &mut metas, &mut contents)?;
