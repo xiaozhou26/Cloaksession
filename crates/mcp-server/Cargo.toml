@@ -23,3 +23,4 @@ uuid = { version = "1", features = ["v4"] }
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tempfile = "3"

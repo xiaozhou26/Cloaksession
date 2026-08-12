@@ -13,35 +13,35 @@
 //! field names, same `#[serde(rename = "type")]` for proxy_type).
 
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Empty args marker. `Default` is the only derive that makes sense for a
 /// zero-field struct; `JsonSchema` + `Deserialize` are derived so all arg
 /// structs share a uniform shape for downstream generic code.
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct ListProfilesArgs {}
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileIdArgs {
     pub profile_id: String,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NavigateArgs {
     pub profile_id: String,
     pub url: String,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ClickArgs {
     pub profile_id: String,
     pub selector: String,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TypeArgs {
     pub profile_id: String,
@@ -55,7 +55,7 @@ pub struct TypeArgs {
 /// intentionally avoid adding a schemars dependency to that crate. Field names
 /// and the `#[serde(rename = "type")]` mirror the core type so that values
 /// parsed here can be re-serialized and fed into core APIs unchanged.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProxyConfigSchema {
     #[serde(rename = "type")]
@@ -69,7 +69,7 @@ pub struct ProxyConfigSchema {
 /// Wire-compatible schema mirror of `multizen_core::PartialFingerprintInput`.
 ///
 /// Only the fields we expose via MCP are listed; all are optional.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PartialFingerprintSchema {
     pub user_agent: Option<String>,
@@ -78,7 +78,7 @@ pub struct PartialFingerprintSchema {
     pub country: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProfileArgs {
     pub name: String,
@@ -91,7 +91,7 @@ pub struct CreateProfileArgs {
 
 /// All fields optional except `profile_id`. Mirrors the core `UpdateProfileInput`
 /// surface that MCP clients are allowed to touch.
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProfileArgs {
     pub profile_id: String,
@@ -103,7 +103,7 @@ pub struct UpdateProfileArgs {
     pub seed: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EvaluateJsArgs {
     pub profile_id: String,
@@ -111,7 +111,7 @@ pub struct EvaluateJsArgs {
     pub session_id: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WaitForSelectorArgs {
     pub profile_id: String,
@@ -124,28 +124,28 @@ fn default_wait_timeout_ms() -> u64 {
     30000
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WaitForNavigationArgs {
     pub profile_id: String,
     pub timeout_ms: Option<u64>,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivateTabArgs {
     pub profile_id: String,
     pub tab_id: String,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CloseTabArgs {
     pub profile_id: String,
     pub tab_id: String,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CdpSendArgs {
     pub profile_id: String,
@@ -154,7 +154,7 @@ pub struct CdpSendArgs {
     pub session_id: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GetCookiesArgs {
     pub profile_id: String,
@@ -162,7 +162,7 @@ pub struct GetCookiesArgs {
     pub session_id: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SetCookiesArgs {
     pub profile_id: String,
@@ -170,7 +170,7 @@ pub struct SetCookiesArgs {
     pub session_id: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NewTabArgs {
     pub profile_id: String,
