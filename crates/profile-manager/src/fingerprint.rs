@@ -1,8 +1,3 @@
-// MINIMAL STUB — Task 5 replaces with full spec version.
-// Provides just enough of `default_fingerprint` for Task 4's ProfileManager
-// CRUD tests to pass. Task 5 will overwrite this file and add its own tests
-// (tests/fingerprint.rs).
-
 use multizen_core::{
     ClientHints, DeviceFamily, FingerprintConfig, ScreenSize, WebGlConfig,
 };
