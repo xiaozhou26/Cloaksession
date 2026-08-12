@@ -265,7 +265,8 @@ export function App(): JSX.Element {
     try {
       await profilesApi.launch(id);
     } catch (e) {
-      showToast(`Launch failed: ${(e as Error).message}`);
+      const msg = typeof e === "string" ? e : (e as Error).message ?? String(e);
+      showToast(`Launch failed: ${msg}`);
     }
     await refresh();
   }
