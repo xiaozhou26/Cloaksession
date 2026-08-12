@@ -11,7 +11,7 @@ browser-launcher = { path = "../browser-launcher" }
 cdp-driver = { path = "../cdp-driver" }
 mcp-server = { path = "../mcp-server" }
 behavioral = { path = "../behavioral" }
-tauri = { version = "2" }
+tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 serde = { version = "1", features = ["derive"] }
@@ -26,4 +26,4 @@ axum = "0.7"
 tempfile = "3"
 
 [build-dependencies]
-tauri-build = { version = "2" }
+tauri-build = { version = "2", features = [] }

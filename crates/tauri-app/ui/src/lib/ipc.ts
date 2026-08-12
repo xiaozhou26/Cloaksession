@@ -232,13 +232,13 @@ export const fingerprint = {
 
 export const proxy = {
   /**
-   * `proxy_detect_geo` → not yet wired to the launcher-thread geo probe
-   * (deferred to P4.8). The Rust command returns `Err(String)`, which
-   * Tauri surfaces as a rejected promise; callers must try/catch and
-   * read `(e as Error).message`. Typed as `Promise<ProxyGeoResult>` —
-   * the success shape — so the resolved-value type is accurate when the
-   * probe eventually lands; the rejection path is the runtime contract
-   * until the backend is wired.
+   /**
+   * `proxy_detect_geo` → `ProxyGeoResult`. Probes the exit IP / geo of the
+   * proxy via ipapi.co (12s timeout). Runs on the Tauri async runtime using
+   * the P2.7 `browser-launcher::proxy_geo::probe_proxy_geo` helper — no
+   * launcher-thread routing needed. `profileId` is accepted for future
+   * "persist resolved country onto the profile" wiring but not yet used
+   * by the backend.
    */
   detectGeo: (
     proxy: ProxyConfig,
