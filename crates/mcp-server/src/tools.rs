@@ -520,6 +520,27 @@ fn common_locales() -> Vec<&'static str> {
 // CDP-backed tools
 // ---------------------------------------------------------------------------
 
+/// Defense-in-depth wrapper: verify the CDP method is allowed before
+/// dispatching via `driver.cdp_send`. All internal CDP tools must route
+/// through this helper so the allow-list is enforced uniformly (the public
+/// `cdp_send` tool already checks; internal tools previously skipped it).
+async fn cdp_send_safe(
+    driver: &dyn BrowserDriver,
+    profile_id: &str,
+    method: &str,
+    params: Option<serde_json::Value>,
+    session_id: Option<&str>,
+) -> Result<serde_json::Value> {
+    if !security::cdp_method_allowed(method) {
+        return Err(MultizenError::Mcp(format!(
+            "CDP method `{method}` is not allowed"
+        )));
+    }
+    driver
+        .cdp_send(profile_id, method, params, session_id, true)
+        .await
+}
+
 pub async fn evaluate_js(
     driver: &dyn BrowserDriver,
     _pm: &ProfileManager,
@@ -538,15 +559,14 @@ pub async fn evaluate_js(
             "expression": args.expression,
             "returnByValue": true,
         });
-        let result = driver
-            .cdp_send(
-                &args.profile_id,
-                "Runtime.evaluate",
-                Some(params),
-                args.session_id.as_deref(),
-                true,
-            )
-            .await?;
+        let result = cdp_send_safe(
+            driver,
+            &args.profile_id,
+            "Runtime.evaluate",
+            Some(params),
+            args.session_id.as_deref(),
+        )
+        .await?;
         Ok(result)
     }
     .await;
@@ -579,15 +599,14 @@ pub async fn wait_for_selector(
                 "expression": expr,
                 "returnByValue": true,
             });
-            let result = driver
-                .cdp_send(
-                    &args.profile_id,
-                    "Runtime.evaluate",
-                    Some(params),
-                    None,
-                    true,
-                )
-                .await?;
+            let result = cdp_send_safe(
+                driver,
+                &args.profile_id,
+                "Runtime.evaluate",
+                Some(params),
+                None,
+            )
+            .await?;
             let found = result
                 .get("result")
                 .and_then(|r| r.get("value"))
@@ -624,15 +643,14 @@ pub async fn list_tabs(
     let started = Instant::now();
     let res = async {
         assert_profile_running(driver, &args.profile_id)?;
-        let result = driver
-            .cdp_send(
-                &args.profile_id,
-                "Target.getTargets",
-                None,
-                None,
-                true,
-            )
-            .await?;
+        let result = cdp_send_safe(
+            driver,
+            &args.profile_id,
+            "Target.getTargets",
+            None,
+            None,
+        )
+        .await?;
         Ok(result)
     }
     .await;
@@ -658,15 +676,14 @@ pub async fn activate_tab(
     let res = async {
         assert_profile_running(driver, &args.profile_id)?;
         let params = serde_json::json!({ "targetId": args.tab_id });
-        let _ = driver
-            .cdp_send(
-                &args.profile_id,
-                "Target.activateTarget",
-                Some(params),
-                None,
-                true,
-            )
-            .await?;
+        let _ = cdp_send_safe(
+            driver,
+            &args.profile_id,
+            "Target.activateTarget",
+            Some(params),
+            None,
+        )
+        .await?;
         Ok(serde_json::json!({ "activated": true }))
     }
     .await;
@@ -692,15 +709,14 @@ pub async fn close_tab(
     let res = async {
         assert_profile_running(driver, &args.profile_id)?;
         let params = serde_json::json!({ "targetId": args.tab_id });
-        let _ = driver
-            .cdp_send(
-                &args.profile_id,
-                "Target.closeTarget",
-                Some(params),
-                None,
-                true,
-            )
-            .await?;
+        let _ = cdp_send_safe(
+            driver,
+            &args.profile_id,
+            "Target.closeTarget",
+            Some(params),
+            None,
+        )
+        .await?;
         Ok(serde_json::json!({ "closed": true }))
     }
     .await;
@@ -788,8 +804,7 @@ async fn poll_ready_state(driver: &dyn BrowserDriver, profile_id: &str) -> Resul
         "expression": "document.readyState === 'complete'",
         "returnByValue": true,
     });
-    let result = driver
-        .cdp_send(profile_id, "Runtime.evaluate", Some(params), None, true)
+    let result = cdp_send_safe(driver, profile_id, "Runtime.evaluate", Some(params), None)
         .await?;
     Ok(result
         .get("result")
@@ -860,15 +875,14 @@ pub async fn get_cookies(
             security::assert_safe_url(u)?;
         }
         let params = serde_json::json!({ "urls": args.urls });
-        let result = driver
-            .cdp_send(
-                &args.profile_id,
-                "Network.getCookies",
-                Some(params),
-                args.session_id.as_deref(),
-                true,
-            )
-            .await?;
+        let result = cdp_send_safe(
+            driver,
+            &args.profile_id,
+            "Network.getCookies",
+            Some(params),
+            args.session_id.as_deref(),
+        )
+        .await?;
         Ok(result)
     }
     .await;
@@ -898,15 +912,14 @@ pub async fn set_cookies(
             security::assert_no_blocked_scheme_in_params(c)?;
         }
         let params = serde_json::json!({ "cookies": args.cookies });
-        let _ = driver
-            .cdp_send(
-                &args.profile_id,
-                "Network.setCookies",
-                Some(params),
-                args.session_id.as_deref(),
-                true,
-            )
-            .await?;
+        let _ = cdp_send_safe(
+            driver,
+            &args.profile_id,
+            "Network.setCookies",
+            Some(params),
+            args.session_id.as_deref(),
+        )
+        .await?;
         Ok(serde_json::json!({ "set": true }))
     }
     .await;
@@ -933,15 +946,14 @@ pub async fn new_tab(
         assert_profile_running(driver, &args.profile_id)?;
         security::assert_safe_url(&args.url)?;
         let params = serde_json::json!({ "url": args.url });
-        let result = driver
-            .cdp_send(
-                &args.profile_id,
-                "Target.createTarget",
-                Some(params),
-                None,
-                true,
-            )
-            .await?;
+        let result = cdp_send_safe(
+            driver,
+            &args.profile_id,
+            "Target.createTarget",
+            Some(params),
+            None,
+        )
+        .await?;
         Ok(result)
     }
     .await;

@@ -89,10 +89,8 @@ function probe(profileId: string, proxy: ProxyConfig, lastCc?: string): Promise<
     runQueued(async () => {
       let health: ProxyHealth;
       try {
-        const res = await proxyApi.detectGeo(proxy, profileId);
-        health = res.ok
-          ? { status: "ok", cc: res.geo.country, country: res.geo.countryName, ip: res.geo.ip }
-          : { status: "error", error: res.error, cc: lastCc };
+        const geo = await proxyApi.detectGeo(proxy, profileId);
+        health = { status: "ok", cc: geo.country, country: geo.countryName, ip: geo.ip };
       } catch (e) {
         health = { status: "error", error: e instanceof Error ? e.message : String(e), cc: lastCc };
       }

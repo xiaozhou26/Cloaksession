@@ -65,15 +65,29 @@ const CMD_CHANNEL_SIZE: usize = 64;
 
 /// Payload for the `profiles:running-changed` push event.
 ///
-/// Emitted from `TauriBrowserDriver::launch` (with `running: true`) and
-/// `TauriBrowserDriver::close` (with `running: false`) after the operation
-/// succeeds. The frontend uses this to refresh its running-indicator UI
-/// without re-polling `profiles:list`.
+/// Discriminated union tagged on `kind`, matching the frontend
+/// `RunningStateChange` type in `ui/src/types.ts`. Emitted from
+/// `TauriBrowserDriver::launch` (with `kind: "launched"`) and
+/// `TauriBrowserDriver::close` (with `kind: "closed"`) after the
+/// operation succeeds. The frontend uses `change.kind` to drive its
+/// running-indicator UI — `launched`/`closed` end any "Terminating…"
+/// safety timer, `closing` would start one (we don't currently emit a
+/// separate closing phase; the atomic `close()` path emits `closed`).
 #[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RunningStateChange {
-    pub profile_id: String,
-    pub running: bool,
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RunningStateChange {
+    /// Emitted after a successful launch — the profile is now running.
+    Launched { profile_id: String },
+    /// Reserved for a future non-atomic close flow where the process is
+    /// winding down but hasn't fully exited. Not currently emitted.
+    Closing { profile_id: String },
+    /// Emitted after a successful close — the profile is no longer running.
+    /// `reason: "user-close"` is the explicit close path; `"external-exit"`
+    /// would be used if we ever detect an externally-killed process.
+    Closed {
+        profile_id: String,
+        reason: &'static str,
+    },
 }
 
 /// Payload for the `chromium:status` push event.
@@ -386,9 +400,8 @@ impl BrowserDriver for TauriBrowserDriver {
         // lifecycle signal.
         self.emit(
             "profiles:running-changed",
-            &RunningStateChange {
+            &RunningStateChange::Launched {
                 profile_id: profile_id.to_string(),
-                running: true,
             },
         );
         self.emit(
@@ -427,9 +440,9 @@ impl BrowserDriver for TauriBrowserDriver {
         // and the chromium process has stopped.
         self.emit(
             "profiles:running-changed",
-            &RunningStateChange {
+            &RunningStateChange::Closed {
                 profile_id: profile_id.to_string(),
-                running: false,
+                reason: "user-close",
             },
         );
         self.emit(

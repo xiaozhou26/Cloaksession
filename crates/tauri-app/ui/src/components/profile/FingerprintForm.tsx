@@ -68,21 +68,17 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
     setDetecting(true);
     setDetectError(null);
     try {
-      const result = await proxyApi.detectGeo(proxy);
-      if (!result.ok) {
-        setDetectError(result.error);
-        return;
-      }
-      setDetected(result.geo);
+      const geo = await proxyApi.detectGeo(proxy);
+      setDetected(geo);
       // Resolve locale for the proxy's country. Falls back to a culturally
       // adjacent locale for countries that don't have an explicit preset
       // (e.g. Liechtenstein → de-DE, San Marino → it-IT).
       const localeId = await fingerprintApi.localeForCountry(
-        result.geo.country,
+        geo.country,
       );
       if (!localeId) {
         setDetectError(
-          `Proxy is in ${result.geo.countryName} (${result.geo.country}) — no locale preset matches. Pick a locale manually below.`,
+          `Proxy is in ${geo.countryName} (${geo.country}) — no locale preset matches. Pick a locale manually below.`,
         );
         return;
       }
@@ -95,8 +91,8 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
       }
       // Use the detected timezone if it's in the locale's allowed list,
       // otherwise the locale's primary timezone.
-      const tz = match.timezones.includes(result.geo.timezone)
-        ? result.geo.timezone
+      const tz = match.timezones.includes(geo.timezone)
+        ? geo.timezone
         : match.timezones[0];
       await reconcile({ localeId: match.id, timezone: tz });
     } catch (e) {

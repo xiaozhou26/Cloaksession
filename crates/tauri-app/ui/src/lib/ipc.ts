@@ -233,21 +233,18 @@ export const fingerprint = {
 export const proxy = {
   /**
    * `proxy_detect_geo` → not yet wired to the launcher-thread geo probe
-   * (deferred to P4.8). Returns an error string. Typed as `unknown` so
-   * the UI can surface "not yet wired".
-   *
-   * NOTE: renderer expects `{ ok: true; geo: ProxyGeoResult } | { ok: false; error }`.
-   * We return the shape via `unknown`; callers must narrow.
+   * (deferred to P4.8). The Rust command returns `Err(String)`, which
+   * Tauri surfaces as a rejected promise; callers must try/catch and
+   * read `(e as Error).message`. Typed as `Promise<ProxyGeoResult>` —
+   * the success shape — so the resolved-value type is accurate when the
+   * probe eventually lands; the rejection path is the runtime contract
+   * until the backend is wired.
    */
   detectGeo: (
     proxy: ProxyConfig,
     _profileId?: string,
-  ): Promise<{ ok: true; geo: ProxyGeoResult } | { ok: false; error: string }> =>
-    // Cast: the Rust command may return an error string; the renderer
-    // already try/catches. Use `unknown` then assert.
-    invoke<unknown>("proxy_detect_geo", { proxy }) as Promise<
-      { ok: true; geo: ProxyGeoResult } | { ok: false; error: string }
-    >,
+  ): Promise<ProxyGeoResult> =>
+    invoke<ProxyGeoResult>("proxy_detect_geo", { proxy }),
 };
 
 // ---------------------------------------------------------------------------

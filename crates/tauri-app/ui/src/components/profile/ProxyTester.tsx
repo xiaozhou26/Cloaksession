@@ -35,11 +35,9 @@ export function ProxyTester({ proxy, profileId, onProbed }: Props): JSX.Element 
     setError(null);
     setResult(null);
     try {
-      const r = await proxyApi.detectGeo(proxy, profileId);
-      if (r.ok) {
-        setResult(r.geo);
-        onProbed?.();
-      } else setError(r.error);
+      const geo = await proxyApi.detectGeo(proxy, profileId);
+      setResult(geo);
+      onProbed?.();
     } catch (e) {
       setError((e as Error).message);
     } finally {
