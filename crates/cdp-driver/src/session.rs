@@ -4,6 +4,30 @@ use tokio::sync::Mutex;
 
 use crate::safe_cdp::{self, SafeEnableRefcount};
 
+/// Retry a GET request that returns JSON, sleeping `delay_ms` between
+/// attempts, up to `max_attempts` times. Used to wait for Chromium's CDP
+/// port to become ready after process spawn.
+async fn retry_get_json(
+    url: &str,
+    max_attempts: usize,
+    delay_ms: u64,
+) -> std::result::Result<serde_json::Value, String> {
+    let mut last_err = String::new();
+    for i in 0..max_attempts {
+        match reqwest::get(url).await {
+            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                Ok(v) => return Ok(v),
+                Err(e) => last_err = format!("version json: {e}"),
+            },
+            Err(e) => last_err = e.to_string(),
+        }
+        if i + 1 < max_attempts {
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+        }
+    }
+    Err(last_err)
+}
+
 pub struct BrowserSession {
     pub browser: chromiumoxide::Browser,
     pub engine: BrowserEngine,
@@ -18,13 +42,13 @@ pub struct BrowserSession {
 impl BrowserSession {
     pub async fn connect(cdp_endpoint: &str, engine: BrowserEngine) -> Result<Self> {
         // cdp_endpoint is http://127.0.0.1:{port}. Fetch webSocketDebuggerUrl.
+        // Retry for up to ~10s because Chromium takes a moment to open the CDP
+        // port after the process is spawned; an immediate fetch fails with
+        // connection refused.
         let version_url = format!("{cdp_endpoint}/json/version");
-        let resp = reqwest::get(&version_url)
+        let resp = retry_get_json(&version_url, 20, 500)
             .await
-            .map_err(|e| MultizenError::Cdp(format!("version fetch: {e}")))?
-            .json::<serde_json::Value>()
-            .await
-            .map_err(|e| MultizenError::Cdp(format!("version json: {e}")))?;
+            .map_err(|e| MultizenError::Cdp(format!("version fetch: {e}")))?;
         let ws_url = resp
             .get("webSocketDebuggerUrl")
             .and_then(|v| v.as_str())
