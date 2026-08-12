@@ -33,19 +33,20 @@ pub fn allowed_hosts(port: u16) -> Vec<String> {
 /// Build the axum router with `/healthz`, `/mcp`, and `/sse` routes.
 ///
 /// `auth_token`, when set, gates `/mcp` and `/sse` via bearer comparison
-/// using `token::token_matches` (constant-time).
-pub fn build_router(auth_token: Option<String>) -> Router {
+/// using `token::token_matches` (constant-time). `port` is the port the
+/// server is served on, used to build the DNS-rebinding Host allow-list.
+pub fn build_router(auth_token: Option<String>, port: u16) -> Router {
     let mcp_token = auth_token.clone();
     let sse_token = auth_token.clone();
     Router::new()
         .route("/healthz", get(healthz))
         .route(
             "/mcp",
-            post(move |req: Request| handle_mcp(req, mcp_token.clone())),
+            post(move |req: Request| handle_mcp(req, mcp_token.clone(), port)),
         )
         .route(
             "/sse",
-            get(move |req: Request| handle_sse(req, sse_token.clone())),
+            get(move |req: Request| handle_sse(req, sse_token.clone(), port)),
         )
 }
 
@@ -53,7 +54,7 @@ async fn healthz() -> Json<serde_json::Value> {
     Json(json!({"ok": true, "name": "multizen-mcp"}))
 }
 
-async fn handle_mcp(req: Request, auth_token: Option<String>) -> Response {
+async fn handle_mcp(req: Request, auth_token: Option<String>, port: u16) -> Response {
     // Auth check (constant-time bearer compare).
     if let Some(tok) = &auth_token {
         let provided = req.headers().get("authorization").and_then(parse_bearer);
@@ -75,7 +76,7 @@ async fn handle_mcp(req: Request, auth_token: Option<String>) -> Response {
         .get("host")
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
-    if !host_allowed(host, &allowed_hosts(7777)) {
+    if !host_allowed(host, &allowed_hosts(port)) {
         return (
             axum::http::StatusCode::FORBIDDEN,
             "host not allowed",
@@ -95,7 +96,7 @@ async fn handle_mcp(req: Request, auth_token: Option<String>) -> Response {
     .into_response()
 }
 
-async fn handle_sse(req: Request, auth_token: Option<String>) -> Response {
+async fn handle_sse(req: Request, auth_token: Option<String>, port: u16) -> Response {
     // Auth + host mirror handle_mcp; SSE stream wiring lands in Plan 4.
     if let Some(tok) = &auth_token {
         let provided = req.headers().get("authorization").and_then(parse_bearer);
@@ -116,7 +117,7 @@ async fn handle_sse(req: Request, auth_token: Option<String>) -> Response {
         .get("host")
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
-    if !host_allowed(host, &allowed_hosts(7777)) {
+    if !host_allowed(host, &allowed_hosts(port)) {
         return (
             axum::http::StatusCode::FORBIDDEN,
             "host not allowed",

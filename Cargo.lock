@@ -3707,6 +3707,7 @@ name = "tauri-app"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
  "behavioral",
  "browser-launcher",
  "cdp-driver",
@@ -3720,6 +3721,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tempfile",
  "tokio",
  "tracing",
  "uuid",

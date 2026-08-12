@@ -5,12 +5,14 @@
 
 pub mod commands;
 pub mod driver;
+pub mod mcp_embed;
 pub mod registry;
+pub mod token;
 
 pub use driver::TauriBrowserDriver;
 pub use registry::ProfileRegistry;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use mcp_server::activity::ActivityLog;
@@ -92,10 +94,23 @@ fn default_browser_binary() -> PathBuf {
 /// Build the `AppState` from the Tauri app handle: load settings,
 /// construct the `TauriBrowserDriver` (spawns the dedicated launcher
 /// thread), and allocate the shared `ActivityLog` + mcp token slot.
-fn build_app_state(app: &tauri::AppHandle) -> AppState {
+///
+/// Returns the state plus the resolved data-dir path (used by callers
+/// to locate the `mcp-token` file).
+fn build_app_state(app: &tauri::AppHandle) -> (AppState, PathBuf) {
     let (db_path, profiles_root, settings_path) = resolve_paths(app);
+    let data_dir = settings_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let mut store = SettingsStore::new(&settings_path);
-    let settings: AppSettings = store.load().unwrap_or_default();
+    let settings: AppSettings = match store.load() {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("settings load failed at {}: {e}; using defaults", settings_path.display());
+            AppSettings::default()
+        }
+    };
     let engine = settings.browser_engine;
     let browser_binary = settings
         .browser_binary_path
@@ -103,7 +118,7 @@ fn build_app_state(app: &tauri::AppHandle) -> AppState {
         .filter(|s| !s.trim().is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(default_browser_binary);
-    let companion_dir = None; // P4.4 will populate from app data dir.
+    let companion_dir = None;
 
     let registry = Arc::new(ProfileRegistry::new());
     let driver = TauriBrowserDriver::start(
@@ -116,12 +131,13 @@ fn build_app_state(app: &tauri::AppHandle) -> AppState {
     )
     .expect("TauriBrowserDriver::start");
 
-    AppState {
+    let state = AppState {
         driver: Arc::new(driver),
         settings: Mutex::new(store),
         activity: Arc::new(ActivityLog::new()),
         mcp_token: Mutex::new(None),
-    }
+    };
+    (state, data_dir)
 }
 
 /// Build the Tauri app and run it. Lives in the lib crate (not the bin)
@@ -133,7 +149,40 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let state = build_app_state(app.handle());
+            let (state, data_dir) = build_app_state(app.handle());
+
+            // Load (or create) the MCP bearer token.
+            match token::load_or_create_mcp_token(&data_dir) {
+                Ok(tok) => {
+                    tracing::info!("mcp token loaded from {}", data_dir.join("mcp-token").display());
+                    // Decide whether to spawn the HTTP server.
+                    let port = {
+                        let mut store = state.settings.blocking_lock();
+                        let settings = store.load().unwrap_or_default();
+                        if settings.mcp_http_enabled {
+                            Some(settings.mcp_http_port)
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(port) = port {
+                        mcp_embed::start_embedded_mcp(
+                            port,
+                            tok.clone(),
+                            state.driver.clone(),
+                            state.activity.clone(),
+                        );
+                        tracing::info!("embedded mcp http server requested on port {port}");
+                    } else {
+                        tracing::info!("mcp http disabled in settings; not spawning server");
+                    }
+                    *state.mcp_token.blocking_lock() = Some(tok);
+                }
+                Err(e) => {
+                    tracing::warn!("failed to load/create mcp token at {}: {e}", data_dir.join("mcp-token").display());
+                }
+            }
+
             app.manage(state);
             Ok(())
         })
