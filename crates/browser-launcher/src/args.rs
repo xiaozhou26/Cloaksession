@@ -71,6 +71,10 @@ pub fn build_cloak_fingerprint_args(profile_id: &str, fp: &FingerprintConfig) ->
         format!("--fingerprint-screen-height={}", fp.screen.height),
         format!("--fingerprint-hardware-concurrency={}", fp.hardware_concurrency),
         format!("--fingerprint-device-memory={}", device_memory_api_value(fp.device_memory)),
+        // Canvas noise off — FingerprintJS detects canvas noise injection as
+        // tampering. The seed-based fingerprint already provides stable
+        // canvas/audio/WebGL values; noise on top triggers anti-detect.
+        "--fingerprint-noise=false".to_string(),
     ];
     if let Some((brand, version)) = primary_brand(&fp.client_hints.sec_ch_ua) {
         args.push(format!("--fingerprint-brand={brand}"));
@@ -107,7 +111,8 @@ pub fn build_cloak_fingerprint_args(profile_id: &str, fp: &FingerprintConfig) ->
     }
     if let Some(q) = fp.storage_quota {
         if q > 0 {
-            args.push(format!("--fingerprint-storage-quota={q}"));
+            // CloakBrowser expects storage quota in MB, not bytes.
+            args.push(format!("--fingerprint-storage-quota={}", q / 1_000_000));
         }
     }
     args
