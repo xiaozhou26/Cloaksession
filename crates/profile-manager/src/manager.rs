@@ -211,12 +211,11 @@ impl ProfileManager {
             merged.proxy_country = None;
         }
 
-        // merge fingerprint patch
-        if let Some(p) = patch.fingerprint {
-            if let Some(v) = p.user_agent { merged.fingerprint.user_agent = v; }
-            if let Some(v) = p.locale { merged.fingerprint.locale = v; }
-            if let Some(v) = p.timezone { merged.fingerprint.timezone = v; }
-            if let Some(v) = p.country { merged.fingerprint.country = v; }
+        // Whole-replace fingerprint: the UI always holds a complete
+        // FingerprintConfig (from reconcile/generate), so replace rather
+        // than merge individual fields.
+        if let Some(fp) = patch.fingerprint {
+            merged.fingerprint = fp;
         }
 
         self.conn.execute(

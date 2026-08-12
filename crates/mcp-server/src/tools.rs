@@ -411,6 +411,22 @@ pub async fn update_profile(
         let icon = None;
         let start_url = None;
         let search_provider = None;
+        // MCP exposes a partial fingerprint (a few fields); the core
+        // `UpdateProfileInput` now expects a whole `FingerprintConfig`.
+        // Fetch the existing profile, apply the partial patch, then pass
+        // the complete config so no fields are lost.
+        let fingerprint = if let Some(p) = args.fingerprint {
+            let existing = pm.get(&args.profile_id)?
+                .ok_or_else(|| MultizenError::NotFound(args.profile_id.clone()))?;
+            let mut fp = existing.fingerprint;
+            if let Some(v) = p.user_agent { fp.user_agent = v; }
+            if let Some(v) = p.locale { fp.locale = v; }
+            if let Some(v) = p.timezone { fp.timezone = v; }
+            if let Some(v) = p.country { fp.country = v; }
+            Some(fp)
+        } else {
+            None
+        };
         let patch = UpdateProfileInput {
             name: args.name.clone(),
             notes: args.notes.clone(),
@@ -419,7 +435,7 @@ pub async fn update_profile(
             start_url,
             search_provider,
             proxy,
-            fingerprint: args.fingerprint.map(PartialFingerprintInput::from),
+            fingerprint,
             extensions: None,
         };
         let profile = pm.update(&args.profile_id, patch)?;

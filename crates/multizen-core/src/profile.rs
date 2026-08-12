@@ -168,7 +168,10 @@ pub struct CreateProfileInput {
 }
 
 /// Partial fingerprint patch — all fields optional, merges over existing.
-/// serde flattens into a map so we can merge without defining every field twice.
+/// Used by `CreateProfileInput` where only a few fields are seeded; the
+/// rest default via `default_fingerprint`. `UpdateProfileInput` uses the
+/// full `FingerprintConfig` (whole-replace) because the UI always holds a
+/// complete config (from `fingerprint_reconcile` / `fingerprint_generate`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PartialFingerprintInput {
@@ -176,7 +179,6 @@ pub struct PartialFingerprintInput {
     pub locale: Option<String>,
     pub timezone: Option<String>,
     pub country: Option<String>,
-    // other fields left as None → keep existing on merge
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -189,7 +191,12 @@ pub struct UpdateProfileInput {
     pub start_url: Option<Option<String>>,
     pub search_provider: Option<Option<String>>,
     pub proxy: Option<Option<ProxyConfig>>,
-    pub fingerprint: Option<PartialFingerprintInput>,
+    /// Whole-replace: the UI always holds a complete FingerprintConfig
+    /// (produced by `fingerprint_reconcile` / `fingerprint_generate`), so
+    /// merging individual fields would silently drop fields the
+    /// `PartialFingerprintInput` struct doesn't model (fontsDir,
+    /// storageQuota, seed, screen, device, …).
+    pub fingerprint: Option<FingerprintConfig>,
     pub extensions: Option<Vec<ExtensionConfig>>,
 }
 

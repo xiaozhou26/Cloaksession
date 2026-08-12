@@ -176,7 +176,8 @@ export interface UpdateProfileInput {
   startUrl?: string | null;
   searchProvider?: string | null;
   proxy?: ProxyConfig | null;
-  fingerprint?: PartialFingerprintInput;
+  /** Whole-replace — the UI always holds a complete FingerprintConfig. */
+  fingerprint?: FingerprintConfig;
   extensions?: ExtensionConfig[];
 }
 

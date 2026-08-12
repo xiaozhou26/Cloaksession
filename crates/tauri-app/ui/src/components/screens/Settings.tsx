@@ -349,8 +349,7 @@ export function Settings({ onImport }: Props): JSX.Element {
 
         <Row icon={<Sparkles size={16} strokeWidth={1.5} />} title="About" desc="">
           <div className="mono text-[12px] text-slate-400 leading-relaxed">
-            MultiZen v{info?.appVersion ?? "0.0.0"} · {info?.platform ?? "—"} · Electron{" "}
-            {electronVersion()}
+            MultiZen v{info?.appVersion ?? "0.0.0"} · {info?.platform ?? "—"} · Tauri 2.x
           </div>
         </Row>
       </div>
@@ -374,11 +373,6 @@ const engineOptions: Array<{
     description: "Compatibility fallback using Google's official automation build.",
   },
 ];
-
-function electronVersion(): string {
-  // Vite injects nothing useful here; just use a stable string for now.
-  return "33";
-}
 
 function updateLabel(status: UpdateStatus | null): string {
   switch (status?.kind) {
