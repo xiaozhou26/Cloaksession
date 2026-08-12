@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability set for the MultiZen Tauri shell. Grants the frontend access to the core Tauri APIs (window, webview, event, app, path, image) and to the dialog plugin (used by `dialog_pick_browser_binary` / `dialog_pick_directory`). IPC commands themselves (the `#[tauri::command]` handlers in `commands/`) do NOT require capability entries — Tauri 2.x restricts core/plugin APIs, not user-defined commands.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default"
+  ]
+}

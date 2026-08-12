@@ -50,7 +50,10 @@ use std::sync::{Arc, Mutex as StdMutex};
 use async_trait::async_trait;
 use cdp_driver::session::BrowserSession;
 use mcp_server::driver::BrowserDriver;
-use multizen_core::{BrowserEngine, LaunchedProfile, MultizenError, Result};
+use multizen_core::{
+    BrowserEngine, CreateProfileInput, LaunchedProfile, MultizenError, Profile, ProfileSummary,
+    Result, UpdateProfileInput,
+};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::registry::ProfileRegistry;
@@ -73,6 +76,30 @@ enum LauncherCmd {
     },
     /// Ask the launcher thread to shut down (runs `close_all` then exits).
     Shutdown,
+    // --- Profile commands (P4.3) ---------------------------------------
+    // ProfileManager lives on the launcher thread (its rusqlite Connection
+    // is `!Send + !Sync`). These variants route synchronous pm calls onto
+    // that thread; each carries a oneshot for the reply.
+    ListProfiles {
+        resp: oneshot::Sender<Result<Vec<ProfileSummary>>>,
+    },
+    GetProfile {
+        id: String,
+        resp: oneshot::Sender<Result<Option<Profile>>>,
+    },
+    CreateProfile {
+        input: CreateProfileInput,
+        resp: oneshot::Sender<Result<Profile>>,
+    },
+    UpdateProfile {
+        id: String,
+        patch: UpdateProfileInput,
+        resp: oneshot::Sender<Result<Profile>>,
+    },
+    DeleteProfile {
+        id: String,
+        resp: oneshot::Sender<Result<()>>,
+    },
 }
 
 pub struct TauriBrowserDriver {
@@ -150,7 +177,8 @@ fn launcher_thread_main(
     // launcher thread). Suppress the clippy lint — same pattern as the
     // browser-launcher integration test.
     #[allow(clippy::arc_with_non_send_sync)]
-    let launcher = browser_launcher::BrowserLauncher::new(Arc::new(pm));
+    let pm_arc = Arc::new(pm);
+    let launcher = browser_launcher::BrowserLauncher::new(pm_arc.clone());
 
     let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(r) => r,
@@ -160,13 +188,17 @@ fn launcher_thread_main(
         }
     };
     let local = tokio::task::LocalSet::new();
-    local.block_on(&rt, launcher_task(launcher, &mut rx));
+    local.block_on(&rt, launcher_task(launcher, pm_arc, &mut rx));
 }
 
 /// Command loop run on the launcher thread's `LocalSet`. Owns the
-/// `BrowserLauncher` and processes commands one at a time.
+/// `BrowserLauncher` and processes commands one at a time. Also owns an
+/// `Arc<ProfileManager>` clone for synchronous profile CRUD (the pm lives
+/// on this thread; commands are routed over the channel by
+/// `TauriBrowserDriver`).
 async fn launcher_task(
     launcher: browser_launcher::BrowserLauncher,
+    pm: Arc<profile_manager::ProfileManager>,
     rx: &mut mpsc::Receiver<LauncherCmd>,
 ) {
     while let Some(cmd) = rx.recv().await {
@@ -190,6 +222,21 @@ async fn launcher_task(
             LauncherCmd::Shutdown => {
                 launcher.close_all().await;
                 break;
+            }
+            LauncherCmd::ListProfiles { resp } => {
+                let _ = resp.send(pm.list());
+            }
+            LauncherCmd::GetProfile { id, resp } => {
+                let _ = resp.send(pm.get(&id));
+            }
+            LauncherCmd::CreateProfile { input, resp } => {
+                let _ = resp.send(pm.create(input));
+            }
+            LauncherCmd::UpdateProfile { id, patch, resp } => {
+                let _ = resp.send(pm.update(&id, patch));
+            }
+            LauncherCmd::DeleteProfile { id, resp } => {
+                let _ = resp.send(pm.delete(&id));
             }
         }
     }
@@ -332,5 +379,82 @@ impl TauriBrowserDriver {
                  call launch first"
             ))
         })
+    }
+
+    // --- Profile CRUD (P4.3) -------------------------------------------
+    // Each method sends a `LauncherCmd` variant + oneshot to the launcher
+    // thread, where `ProfileManager` lives. The pm methods are synchronous;
+    // they execute on the launcher thread and reply via the oneshot.
+
+    pub async fn list_profiles(&self) -> Result<Vec<ProfileSummary>> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.launcher_tx
+            .send(LauncherCmd::ListProfiles { resp: resp_tx })
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
+        resp_rx
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))?
+    }
+
+    pub async fn get_profile(&self, id: &str) -> Result<Option<Profile>> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.launcher_tx
+            .send(LauncherCmd::GetProfile {
+                id: id.to_string(),
+                resp: resp_tx,
+            })
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
+        resp_rx
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))?
+    }
+
+    pub async fn create_profile(&self, input: CreateProfileInput) -> Result<Profile> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.launcher_tx
+            .send(LauncherCmd::CreateProfile {
+                input,
+                resp: resp_tx,
+            })
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
+        resp_rx
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))?
+    }
+
+    pub async fn update_profile(
+        &self,
+        id: &str,
+        patch: UpdateProfileInput,
+    ) -> Result<Profile> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.launcher_tx
+            .send(LauncherCmd::UpdateProfile {
+                id: id.to_string(),
+                patch,
+                resp: resp_tx,
+            })
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
+        resp_rx
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))?
+    }
+
+    pub async fn delete_profile(&self, id: &str) -> Result<()> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.launcher_tx
+            .send(LauncherCmd::DeleteProfile {
+                id: id.to_string(),
+                resp: resp_tx,
+            })
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
+        resp_rx
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))?
     }
 }
