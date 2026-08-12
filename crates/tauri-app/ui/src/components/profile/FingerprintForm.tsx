@@ -89,11 +89,12 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
         );
         return;
       }
-      // Use the detected timezone if it's in the locale's allowed list,
-      // otherwise the locale's primary timezone.
-      const tz = match.timezones.includes(geo.timezone)
-        ? geo.timezone
-        : match.timezones[0];
+      // The proxy's actual timezone always wins — it's ground truth from
+      // the exit IP. Only fall back to the locale preset if the probe
+      // returned no timezone (rare). Using the locale's timezone instead
+      // would recreate the locale/timezone mismatch anti-bot systems flag
+      // (e.g. en-GB locale + Europe/London tz for a Singapore proxy).
+      const tz = geo.timezone || match.timezones[0];
       await reconcile({ localeId: match.id, timezone: tz });
     } catch (e) {
       setDetectError((e as Error).message);
