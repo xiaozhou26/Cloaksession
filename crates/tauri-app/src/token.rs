@@ -1,6 +1,6 @@
 //! MCP bearer-token management.
 //!
-//! `load_or_create_mcp_token(data_dir)` returns the 64-hex (128-bit entropy)
+//! `load_or_create_mcp_token(data_dir)` returns the 64-hex (256-bit entropy)
 //! token stored at `<data_dir>/mcp-token`, creating it with fresh entropy
 //! if the file is missing or malformed. Files are created with 0600
 //! permissions on Unix; Windows has no portable equivalent so we only
@@ -14,7 +14,7 @@ use multizen_core::Result;
 /// fresh 64-hex token and persist it.
 ///
 /// A valid token is exactly 64 lowercase ASCII hex characters
-/// (two concatenated UUIDv4 simple representations = 128 bits of entropy).
+/// (two concatenated UUIDv4 simple representations = 256 bits of entropy).
 /// Existing files that fail this check are overwritten.
 pub fn load_or_create_mcp_token(data_dir: &Path) -> Result<String> {
     let path = data_dir.join("mcp-token");
@@ -95,7 +95,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_token_has_128_bits_entropy() {
+    fn generated_token_has_256_bits_entropy() {
         let t = generate_token();
         assert_eq!(t.len(), 64);
         assert!(t.chars().all(|c| c.is_ascii_hexdigit()));

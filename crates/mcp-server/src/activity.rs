@@ -78,6 +78,19 @@ impl ActivityLog {
         guard.iter().rev().take(limit).cloned().collect()
     }
 
+    /// Subscribe to the broadcast stream of activity events.
+    ///
+    /// Each `start_call` (pending) and `finish` (completed) emits a clone of
+    /// the `ActivityEvent` to every active receiver. Receivers that lag the
+    /// broadcast buffer (256 slots) will observe `RecvError::Lagged` from
+    /// `recv()` — callers should log and continue.
+    ///
+    /// Used by the Tauri shell (P4.5) to bridge activity events to the
+    /// frontend via `app.emit("activity:event", event)`.
+    pub fn subscribe(&self) -> broadcast::Receiver<ActivityEvent> {
+        self.tx.subscribe()
+    }
+
     fn push(&self, event: ActivityEvent) {
         let _ = self.tx.send(event.clone());
         let mut guard = self.events.lock().expect("activity log mutex poisoned");

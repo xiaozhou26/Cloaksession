@@ -54,12 +54,43 @@ use multizen_core::{
     BrowserEngine, CreateProfileInput, LaunchedProfile, MultizenError, Profile, ProfileSummary,
     Result, UpdateProfileInput,
 };
+use serde::Serialize;
+use tauri::Emitter;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::registry::ProfileRegistry;
 
 const NAV_TIMEOUT_MS: u64 = 30_000;
 const CMD_CHANNEL_SIZE: usize = 64;
+
+/// Payload for the `profiles:running-changed` push event.
+///
+/// Emitted from `TauriBrowserDriver::launch` (with `running: true`) and
+/// `TauriBrowserDriver::close` (with `running: false`) after the operation
+/// succeeds. The frontend uses this to refresh its running-indicator UI
+/// without re-polling `profiles:list`.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningStateChange {
+    pub profile_id: String,
+    pub running: bool,
+}
+
+/// Payload for the `chromium:status` push event.
+///
+/// Emitted alongside `profiles:running-changed` to give the frontend a
+/// finer-grained lifecycle signal: `started` on successful launch, `stopped`
+/// after successful close, or `failed` with an error message when launch
+/// fails (the process may still be left running; `close` is the recovery
+/// path).
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChromiumStatus {
+    pub profile_id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
 
 /// Commands sent to the dedicated launcher thread.
 enum LauncherCmd {
@@ -117,6 +148,11 @@ pub struct TauriBrowserDriver {
     /// `BrowserLauncher::is_running_async` cannot be awaited from a sync
     /// context.
     running: StdMutex<HashSet<String>>,
+    /// Optional Tauri `AppHandle` used to emit push events
+    /// (`profiles:running-changed`, `chromium:status`). Populated by
+    /// `set_app` during `run()` setup. `None` in unit tests / before
+    /// setup completes; emits are silently skipped in that case.
+    app: StdMutex<Option<tauri::AppHandle>>,
 }
 
 impl TauriBrowserDriver {
@@ -145,7 +181,29 @@ impl TauriBrowserDriver {
             browser_binary,
             companion_dir,
             running: StdMutex::new(HashSet::new()),
+            app: StdMutex::new(None),
         })
+    }
+
+    /// Inject the Tauri `AppHandle` so `launch`/`close` can emit push events
+    /// to the frontend. Called once from `run()`'s `setup` hook. Safe to
+    /// call before or after the driver is `manage`d; the field is a
+    /// `StdMutex<Option<_>>` and emits no-op when `None` (e.g. unit tests).
+    pub fn set_app(&self, app: tauri::AppHandle) {
+        *self.app.lock().unwrap() = Some(app);
+    }
+
+    /// Emit a push event. No-op when no `AppHandle` is set (unit tests,
+    /// pre-setup). Errors from `emit` are logged at warn level and swallowed
+    /// — push events are best-effort and must not break the launch/close
+    /// path.
+    fn emit<E: Serialize + Clone>(&self, event: &str, payload: &E) {
+        let guard = self.app.lock().unwrap();
+        if let Some(app) = guard.as_ref() {
+            if let Err(e) = app.emit(event, payload) {
+                tracing::warn!(event = event, error = %e, "tauri emit failed");
+            }
+        }
     }
 
     /// Best-effort graceful shutdown: tell the launcher thread to exit. The
@@ -255,10 +313,49 @@ impl BrowserDriver for TauriBrowserDriver {
                 resp: resp_tx,
             })
             .await
-            .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
-        let launched = resp_rx
+            .map_err(|e| {
+                // Launch channel failure → emit chromium:status failed before
+                // propagating the error.
+                self.emit(
+                    "chromium:status",
+                    &ChromiumStatus {
+                        profile_id: profile_id.to_string(),
+                        status: "failed".into(),
+                        error: Some(e.to_string()),
+                    },
+                );
+                MultizenError::Mcp("launcher thread closed".into())
+            })?;
+        let launched = match resp_rx
             .await
-            .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))??;
+            .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))
+        {
+            Ok(r) => match r {
+                Ok(l) => l,
+                Err(e) => {
+                    self.emit(
+                        "chromium:status",
+                        &ChromiumStatus {
+                            profile_id: profile_id.to_string(),
+                            status: "failed".into(),
+                            error: Some(e.to_string()),
+                        },
+                    );
+                    return Err(e);
+                }
+            },
+            Err(e) => {
+                self.emit(
+                    "chromium:status",
+                    &ChromiumStatus {
+                        profile_id: profile_id.to_string(),
+                        status: "failed".into(),
+                        error: Some(e.to_string()),
+                    },
+                );
+                return Err(e);
+            }
+        };
 
         // Connect a BrowserSession to the freshly-launched CDP endpoint and
         // register it. If the connect fails the process is left running; the
@@ -267,11 +364,41 @@ impl BrowserDriver for TauriBrowserDriver {
         // launcher may have already marked the profile opened and stored the
         // handle — propagating the connect error keeps the system state
         // inspectable.
-        self.registry
+        if let Err(e) = self
+            .registry
             .get_or_connect(profile_id, &launched.cdp_endpoint, self.engine)
-            .await?;
+            .await
+        {
+            self.emit(
+                "chromium:status",
+                &ChromiumStatus {
+                    profile_id: profile_id.to_string(),
+                    status: "failed".into(),
+                    error: Some(e.to_string()),
+                },
+            );
+            return Err(e);
+        }
 
         self.running.lock().unwrap().insert(profile_id.to_string());
+        // Success → notify frontend. `profiles:running-changed` carries the
+        // authoritative running state; `chromium:status` carries the
+        // lifecycle signal.
+        self.emit(
+            "profiles:running-changed",
+            &RunningStateChange {
+                profile_id: profile_id.to_string(),
+                running: true,
+            },
+        );
+        self.emit(
+            "chromium:status",
+            &ChromiumStatus {
+                profile_id: profile_id.to_string(),
+                status: "started".into(),
+                error: None,
+            },
+        );
         Ok(launched)
     }
 
@@ -296,6 +423,23 @@ impl BrowserDriver for TauriBrowserDriver {
             .await
             .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))??;
         self.running.lock().unwrap().remove(profile_id);
+        // Success → notify frontend that the profile is no longer running
+        // and the chromium process has stopped.
+        self.emit(
+            "profiles:running-changed",
+            &RunningStateChange {
+                profile_id: profile_id.to_string(),
+                running: false,
+            },
+        );
+        self.emit(
+            "chromium:status",
+            &ChromiumStatus {
+                profile_id: profile_id.to_string(),
+                status: "stopped".into(),
+                error: None,
+            },
+        );
         Ok(())
     }
 

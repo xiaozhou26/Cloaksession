@@ -18,7 +18,7 @@ use std::sync::Arc;
 use mcp_server::activity::ActivityLog;
 use multizen_core::AppSettings;
 use settings_store::{default_settings_path, SettingsStore};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
 
 use crate::commands::{
@@ -150,6 +150,48 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let (state, data_dir) = build_app_state(app.handle());
+
+            // Wire the driver's `AppHandle` so launch/close can emit
+            // `profiles:running-changed` / `chromium:status` push events.
+            state.driver.set_app(app.handle().clone());
+
+            // Spawn a background task that bridges `ActivityLog`'s broadcast
+            // stream to the Tauri frontend via `activity:event`. Every
+            // `start_call` (pending) and `finish` (completed) event is emitted;
+            // the frontend filters as needed. Broadcast lag is logged and
+            // recovered (the next event resyncs the receiver).
+            {
+                let app_handle = app.handle().clone();
+                let activity = state.activity.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut rx = activity.subscribe();
+                    tracing::info!("activity:event bridge task started");
+                    loop {
+                        match rx.recv().await {
+                            Ok(event) => {
+                                if let Err(e) =
+                                    app_handle.emit("activity:event", &event)
+                                {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "emit activity:event failed"
+                                    );
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                tracing::warn!(
+                                    skipped = n,
+                                    "activity:event bridge lagged; resyncing"
+                                );
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                tracing::info!("activity:event bridge: sender closed; exiting");
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
 
             // Load (or create) the MCP bearer token.
             match token::load_or_create_mcp_token(&data_dir) {
