@@ -18,7 +18,7 @@ fn normal_ms(u1: f64, u2: f64, u3: f64) -> u64 {
     // Irwin–Hall n=3 has mean 1.5, variance 0.25 → std 0.5.
     let z = ((u1 + u2 + u3) - 1.5) / 0.5;
     let ms = mean + z * std;
-    ms.max(40.0).min(400.0) as u64
+    ms.clamp(40.0, 400.0) as u64
 }
 
 pub fn humanized_keystroke_delays(text: &str, seed: u64) -> Vec<u64> {
