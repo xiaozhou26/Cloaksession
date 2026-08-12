@@ -9,6 +9,9 @@
 /.claude/
 /.trellis/
 
+# Planning docs
+/docs/
+
 # Tauri dev logs
 tauri-*.log
 
