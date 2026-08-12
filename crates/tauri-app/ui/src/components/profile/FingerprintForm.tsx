@@ -179,9 +179,26 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
         <Select
           value={fingerprint.timezone}
           onChange={(v) => void reconcile({ timezone: v })}
-          options={(currentLocale?.timezones ?? [fingerprint.timezone]).map(
-            (tz) => ({ value: tz, label: tz }),
-          )}
+          options={(() => {
+            // The proxy's actual timezone (from the geo probe) may not be
+            // in the locale's cultural preset (e.g. en-GB presets only
+            // Europe/London, but a SG proxy gives Asia/Singapore). Without
+            // including the current value as an option, the <select> shows
+            // the first preset instead of the real value — looking like
+            // "Match proxy did nothing".
+            const presets = currentLocale?.timezones ?? [];
+            const opts = presets.map((tz) => ({ value: tz, label: tz }));
+            if (
+              fingerprint.timezone &&
+              !presets.includes(fingerprint.timezone)
+            ) {
+              opts.unshift({
+                value: fingerprint.timezone,
+                label: `${fingerprint.timezone} (proxy)`,
+              });
+            }
+            return opts;
+          })()}
         />
       </Field>
 

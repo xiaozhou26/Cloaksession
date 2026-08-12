@@ -190,24 +190,23 @@ export const fingerprint = {
     invoke<FingerprintConfig>("fingerprint_generate", { seed: "" }),
 
   /**
-   * `fingerprint_devices` → `Vec<&str>` (kebab-case family ids).
-   * Renderer expects `DeviceCatalogEntry[]`; Rust returns `string[]`.
-   * Typed as `DeviceCatalogEntry[]` for the renderer; runtime cast may
-   * be needed in P4.8.
+   * `fingerprint_devices` → `Vec<DeviceCatalogEntry>`.
    */
   devices: (): Promise<DeviceCatalogEntry[]> =>
     invoke<DeviceCatalogEntry[]>("fingerprint_devices"),
 
   /**
-   * `fingerprint_locales` → `Vec<&str>` (BCP-47 locale ids).
-   * Renderer expects `LocaleCatalogEntry[]`; Rust returns `string[]`.
+   * `fingerprint_locales` → `Vec<LocaleCatalogEntry>`.
    */
   locales: (): Promise<LocaleCatalogEntry[]> =>
     invoke<LocaleCatalogEntry[]>("fingerprint_locales"),
 
   /**
-   * `fingerprint_reconcile` → not yet implemented in Rust (deferred to P5).
-   * Returns an error string; typed so the UI can detect the gap.
+   * `fingerprint_reconcile` → `FingerprintConfig`. Applies a partial patch
+   * (locale/timezone/device/screen/hardware/memory/country) to the given
+   * fingerprint and returns the updated config. Locale changes re-derive
+   * `languages`, `accept_language`, and `country`; the `country` override
+   * (from the proxy geo probe) takes precedence over the locale's region.
    */
   reconcile: (
     current: FingerprintConfig,
