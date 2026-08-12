@@ -1,2 +1,13 @@
 /target
 **/*.rs.bk
+
+# IDE
+/.idea/
+/.vscode/
+
+# Tauri dev logs
+tauri-*.log
+
+# OS
+Thumbs.db
+.DS_Store

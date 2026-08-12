@@ -1,6 +1,6 @@
-# multizen-ui
+# cloaksession-ui
 
-React 19 + Tailwind v4 + Vite frontend for the MultiZen Tauri shell. Migrated
+React 19 + Tailwind v4 + Vite frontend for the Cloaksession Tauri shell. Migrated
 from the Electron renderer in `apps/desktop/src/renderer/`.
 
 ## Structure

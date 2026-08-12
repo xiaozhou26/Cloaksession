@@ -35,9 +35,11 @@ fn parse_web_store_id(input: &str) -> Result<String, String> {
     if trimmed.len() == 32 && trimmed.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Ok(trimmed.to_lowercase());
     }
-    // URL — the id is the last path segment.
+    // URL — strip query/fragment first, then the id is the last path segment.
     if trimmed.starts_with("http") {
-        if let Some(id) = trimmed.rsplit('/').next() {
+        // Remove query string and fragment.
+        let no_query = trimmed.split(['?', '#']).next().unwrap_or(trimmed);
+        if let Some(id) = no_query.rsplit('/').next() {
             let id = id.trim();
             if id.len() == 32 && id.chars().all(|c| c.is_ascii_alphanumeric()) {
                 return Ok(id.to_lowercase());
@@ -50,12 +52,26 @@ fn parse_web_store_id(input: &str) -> Result<String, String> {
 }
 
 /// Download the .crx for `id` from the Chrome Web Store update URL.
+/// Uses the `x=` parameter encoding (matching the browser's own update
+/// endpoint) — directly splicing `id=` in the URL query returns 204 for
+/// many extensions. `prodversion` should be a real Chromium version; the
+/// hardcoded "131.0" works but a real engine version is preferable when
+/// available (the original Electron app reads it from the browser).
 async fn download_crx(id: &str) -> Result<Vec<u8>, String> {
+    let inner = format!("id={id}&installsource=ondemand&uc");
+    // Encode the inner query string as a single value for the `x=` param.
+    // Use percent-encoding for the reserved chars (&, =) so Google's endpoint
+    // parses them as literal characters within the `x` value, not as
+    // top-level query separators.
+    use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+    let encoded_inner = utf8_percent_encode(&inner, NON_ALPHANUMERIC);
     let url = format!(
-        "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=131.0&acceptformat=application/x-chexomatic&id={id}&uc"
+        "https://clients2.google.com/service/update2/crx?response=redirect&acceptformat=crx2,crx3&prodversion=131.0&x={encoded_inner}"
     );
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(5))
+        .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(15))
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36")
         .build()
         .map_err(|e| format!("HTTP client build failed: {e}"))?;
@@ -64,16 +80,26 @@ async fn download_crx(id: &str) -> Result<Vec<u8>, String> {
         .send()
         .await
         .map_err(|e| format!("Web Store download failed: {e}"))?;
-    if !resp.status().is_success() {
+    let status = resp.status();
+    if status == 204 {
         return Err(format!(
-            "Web Store returned HTTP {} for extension {id}",
-            resp.status()
+            "Extension {id} isn't available from the Web Store (it may be delisted or region-restricted). Try uploading the .crx/.zip instead."
+        ));
+    }
+    if !status.is_success() {
+        return Err(format!(
+            "Web Store returned HTTP {status} for extension {id}"
         ));
     }
     let bytes = resp
         .bytes()
         .await
         .map_err(|e| format!("Failed to read CRX body: {e}"))?;
+    if bytes.len() < 16 {
+        return Err(format!(
+            "Extension {id} isn't available from the Web Store (empty response). Try uploading the .crx/.zip instead."
+        ));
+    }
     Ok(bytes.to_vec())
 }
 
@@ -87,7 +113,7 @@ fn find_zip_start(buf: &[u8]) -> usize {
         let pk_len = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
         let sig_len = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as usize;
         let offset = 16 + pk_len + sig_len;
-        if offset < buf.len() && &buf[offset..offset.min(offset + 4)] == b"PK\x03\x04" {
+        if offset + 4 <= buf.len() && &buf[offset..offset + 4] == b"PK\x03\x04" {
             return offset;
         }
     }
@@ -271,6 +297,40 @@ pub async fn extensions_list(
         .map_err(|e| e.to_string())
 }
 
+/// Install a web-store extension by id: download CRX (if not cached),
+/// unpack, and upsert into the profile's extension list. Returns the
+/// updated extension list. Shared between the `extensions_add_from_web_store`
+/// Tauri command and the companion poller.
+pub async fn install_from_web_store(
+    driver: &crate::driver::TauriBrowserDriver,
+    profile_id: &str,
+    ext_id: &str,
+) -> Result<Vec<ExtensionConfig>, String> {
+    let extensions_root = driver.extensions_root().to_path_buf();
+
+    // If already installed, skip download.
+    let target = extensions_root.join(ext_id);
+    if !target.exists() {
+        let bytes = download_crx(ext_id).await?;
+        unpack_extension(&bytes, ext_id, &extensions_root).await?;
+    }
+
+    let cfg = build_config("web-store", ext_id, target);
+
+    // Upsert into profile's extension list.
+    let mut exts = driver
+        .list_extensions(profile_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    exts.retain(|e| e.id != cfg.id);
+    exts.push(cfg);
+
+    driver
+        .set_extensions(profile_id, exts)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn extensions_add_from_web_store(
     state: State<'_, AppState>,
@@ -278,31 +338,7 @@ pub async fn extensions_add_from_web_store(
     url_or_id: String,
 ) -> Result<Vec<ExtensionConfig>, String> {
     let ext_id = parse_web_store_id(&url_or_id)?;
-    let extensions_root = state.driver.extensions_root().to_path_buf();
-
-    // If already installed, skip download.
-    let target = extensions_root.join(&ext_id);
-    if !target.exists() {
-        let bytes = download_crx(&ext_id).await?;
-        unpack_extension(&bytes, &ext_id, &extensions_root).await?;
-    }
-
-    let cfg = build_config("web-store", &ext_id, target);
-
-    // Upsert into profile's extension list.
-    let mut exts = state
-        .driver
-        .list_extensions(&profile_id)
-        .await
-        .map_err(|e| e.to_string())?;
-    exts.retain(|e| e.id != cfg.id);
-    exts.push(cfg);
-
-    state
-        .driver
-        .set_extensions(&profile_id, exts)
-        .await
-        .map_err(|e| e.to_string())
+    install_from_web_store(&state.driver, &profile_id, &ext_id).await
 }
 
 #[tauri::command]
@@ -535,6 +571,9 @@ pub async fn extensions_icon(
     ext: ExtensionConfig,
     _profile_id: Option<String>,
 ) -> Result<Option<String>, String> {
+    // _profile_id is unused — icon is read purely from ext.dir. Kept as
+    // a parameter (not removed) so the frontend's {ext, profileId} call
+    // doesn't send an unexpected-key error.
     let dir = PathBuf::from(&ext.dir);
     if !dir.exists() {
         return Ok(None);

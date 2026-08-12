@@ -1,5 +1,5 @@
 /**
- * Frontend IPC layer for MultiZen (P4.6).
+ * Frontend IPC layer for Cloaksession (P4.6).
  *
  * Wraps the Tauri 2.x `invoke` command channel and `listen` event channel.
  *
@@ -56,7 +56,7 @@ export * from "../types";
 
 function notImplemented(name: string): Promise<never> {
   return Promise.reject(
-    new Error(`MultiZen: '${name}' is not implemented in the Tauri build (scope-excluded)`),
+    new Error(`Cloaksession: '${name}' is not implemented in the Tauri build (scope-excluded)`),
   );
 }
 
@@ -96,23 +96,33 @@ export const profiles = {
   close: (id: ProfileId): Promise<void> => invoke<void>("profiles_close", { id }),
 
   /**
-   * `profiles_export_archive` — NOT registered in Tauri backend (scope-excluded).
-   * Stub rejects at runtime; renderer wraps in try/catch.
+   * `profiles_export_archive` → `{ ok: true, path } | { ok: false, reason }`.
+   * Serializes the profile (JSON + data-dir files + shared extensions) into
+   * an AES-256-GCM-encrypted `.mzar` archive. The backend shows a native
+   * save dialog for the output path.
    */
   exportArchive: (
-    _id: ProfileId,
-    _passphrase: string,
+    id: ProfileId,
+    passphrase: string,
   ): Promise<{ ok: true; path: string } | { ok: false; reason: string }> =>
-    notImplemented("profiles.exportArchive"),
+    invoke<{ ok: true; path: string } | { ok: false; reason: string }>(
+      "profiles_export_archive",
+      { id, passphrase },
+    ),
 
   /**
-   * `profiles_import_archive` — NOT registered in Tauri backend (scope-excluded).
-   * Stub rejects at runtime; renderer wraps in try/catch.
+   * `profiles_import_archive` → `{ ok: true, id } | { ok: false, reason }`.
+   * The backend shows a native open dialog for the `.mzar` file, decrypts
+   * with the passphrase, restores the profile into a new data dir, and
+   * returns the new profile id.
    */
   importArchive: (
-    _passphrase: string,
+    passphrase: string,
   ): Promise<{ ok: true; id: ProfileId } | { ok: false; reason: string }> =>
-    notImplemented("profiles.importArchive"),
+    invoke<{ ok: true; id: ProfileId } | { ok: false; reason: string }>(
+      "profiles_import_archive",
+      { passphrase },
+    ),
 };
 
 // ---------------------------------------------------------------------------
@@ -294,20 +304,35 @@ export const chromium = {
 };
 
 // ---------------------------------------------------------------------------
-// Update checker (scope-excluded in P4 — no updater wired).
-// `status()` returns `{ kind: "idle" }` so the banner stays collapsed;
-// other methods reject. `onStatus` returns a no-op unlisten.
+// Update checker — GitHub Releases based.
+// `status()` returns the current cached status; `check()` probes GitHub and
+// emits `update:status` events during the check. On Windows, a newer
+// release triggers an auto-download of the NSIS installer (progress via
+// `downloading` status), after which `ready` is emitted and `install()`
+// launches the installer. On macOS, `available` is terminal and `download()`
+// opens the release page in the browser.
 // ---------------------------------------------------------------------------
 
 export const update = {
+  /** `update_status` → `UpdateStatus`. */
   status: (): Promise<UpdateStatus> =>
-    Promise.resolve({ kind: "idle" } as UpdateStatus),
-  lastChecked: (): Promise<number> => Promise.resolve(0),
+    invoke<UpdateStatus>("update_status"),
+
+  /** `update_last_checked` → epoch ms (0 = never). */
+  lastChecked: (): Promise<number> =>
+    invoke<number>("update_last_checked"),
+
+  /** `update_check` → `UpdateStatus`. Probes GitHub Releases. */
   check: (): Promise<UpdateStatus> =>
-    Promise.resolve({ kind: "no-update" } as UpdateStatus),
-  install: (): Promise<void> => notImplemented("update.install"),
-  download: (_version: string): Promise<void> =>
-    notImplemented("update.download"),
+    invoke<UpdateStatus>("update_check"),
+
+  /** `update_install` → launches the downloaded NSIS installer (Windows). */
+  install: (): Promise<void> =>
+    invoke<void>("update_install"),
+
+  /** `update_download` → opens the release page in browser (macOS fallback). */
+  download: (version: string): Promise<void> =>
+    invoke<void>("update_download", { version }),
 };
 
 // ---------------------------------------------------------------------------
@@ -317,9 +342,9 @@ export const update = {
 // Tauri events. The renderer expects sync `() => void` unlistens but Tauri
 // `listen` is async; callers `await` registration (documented in P4.6).
 //
-// `onProxyCountryUpdated` and `onExtensionInstalled` are scope-excluded
-// (no backend emitter); they return a no-op unlisten so the renderer's
-// cleanup `off*()` calls are safe.
+// `onProxyCountryUpdated` and `onExtensionInstalled` are now wired to real
+// backend emitters (`profiles:proxy-country-updated` and
+// `extensions:installed` respectively).
 // ---------------------------------------------------------------------------
 
 /**
@@ -363,32 +388,48 @@ export function onActivityEvent(
 }
 
 /**
- * `profiles:proxy-country-updated` push event — NOT emitted in the Tauri
- * build (scope-excluded). Returns a no-op unlisten so the renderer's
- * cleanup is safe.
+ * `profiles:proxy-country-updated` push event. Emitted by the startup
+ * backfill task after each successful proxy geo probe. Resolves to an
+ * `UnlistenFn` (await registration before relying on it).
  */
 export function onProxyCountryUpdated(
-  _cb: (update: { id: string; country: string }) => void,
-): Promise<() => void> {
-  return noopUnlisten();
+  cb: (update: { id: string; country: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ id: string; country: string }>(
+    "profiles:proxy-country-updated",
+    (event) => {
+      cb(event.payload);
+    },
+  );
 }
 
 /**
- * `extensions:installed` push event — NOT emitted in the Tauri build
- * (scope-excluded). Returns a no-op unlisten.
+ * `extensions:installed` push event — emitted by the companion poller after
+ * an "Add to Cloaksession" button click on a Chrome Web Store page. Resolves to
+ * an `UnlistenFn` (await registration before relying on it).
  */
 export function onExtensionInstalled(
-  _cb: (e: ExtensionInstalledEvent) => void,
-): Promise<() => void> {
-  return noopUnlisten();
+  cb: (e: ExtensionInstalledEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<ExtensionInstalledEvent>("extensions:installed", (event) => {
+    cb(event.payload);
+  });
 }
 
 /**
- * `update:status` push event — NOT emitted in the Tauri build
- * (scope-excluded). Returns a no-op unlisten.
+ * `update:status` push event. Emitted by the backend on every status
+ * transition during a check or download. Resolves to an `UnlistenFn`.
  */
 export function onUpdateStatus(
-  _cb: (s: UpdateStatus) => void,
-): Promise<() => void> {
-  return noopUnlisten();
+  cb: (s: UpdateStatus) => void,
+): Promise<UnlistenFn> {
+  return listen<UpdateStatus>("update:status", (event) => {
+    // Backend emits `{ status: UpdateStatus }` — unwrap.
+    const payload = event.payload as unknown as { status?: UpdateStatus } | UpdateStatus;
+    if (payload && typeof payload === "object" && "status" in payload) {
+      cb((payload as { status: UpdateStatus }).status);
+    } else {
+      cb(payload as UpdateStatus);
+    }
+  });
 }

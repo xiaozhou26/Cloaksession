@@ -90,7 +90,7 @@ export function Settings({ onImport }: Props): JSX.Element {
       <div className="max-w-[720px] mx-auto">
         <div className="text-lg font-bold tracking-tight text-slate-100 mb-1.5">Settings</div>
         <div className="text-[13px] text-slate-500 mb-5">
-          MCP server, archives, build info. Configuration is local — MultiZen does not call any
+          MCP server, archives, build info. Configuration is local — Cloaksession does not call any
           external API on your behalf.
         </div>
 
@@ -216,7 +216,7 @@ export function Settings({ onImport }: Props): JSX.Element {
         <Row
           icon={<FileSearch size={16} strokeWidth={1.5} />}
           title="Browser binary"
-          desc="Point MultiZen at your own Chromium / CloakBrowser executable instead of auto-downloading. Applied on next app launch."
+          desc="Point Cloaksession at your own Chromium / CloakBrowser executable instead of auto-downloading. Applied on next app launch."
         >
           <div className="flex items-center gap-2">
             <input
@@ -257,7 +257,7 @@ export function Settings({ onImport }: Props): JSX.Element {
             Skip auto-download (use cached binary or the custom path above)
           </label>
           <div className="text-[11px] text-slate-600 mt-2 leading-relaxed">
-            When on, MultiZen never fetches a browser runtime. Launch fails with a clear
+            When on, Cloaksession never fetches a browser runtime. Launch fails with a clear
             error if no binary is available. Pair with a custom path for fully offline setups.
           </div>
         </Row>
@@ -292,7 +292,7 @@ export function Settings({ onImport }: Props): JSX.Element {
           desc={
             info?.platform === "darwin"
               ? "Auto-install isn't available on macOS yet — we'll notify you in-app to download the new version."
-              : "MultiZen checks for updates in the background and installs them on restart."
+              : "Cloaksession checks for updates in the background and installs them on restart."
           }
         >
           <div className="flex items-center gap-2.5 flex-wrap">
@@ -327,7 +327,7 @@ export function Settings({ onImport }: Props): JSX.Element {
         <Row
           icon={<ShieldCheck size={16} strokeWidth={1.5} />}
           title="Anonymous usage"
-          desc="Off by default. Help gauge how many people run MultiZen."
+          desc="Off by default. Help gauge how many people run Cloaksession."
         >
           <label className="flex items-center gap-2.5 text-[12px] text-slate-400 cursor-pointer">
             <input
@@ -349,7 +349,7 @@ export function Settings({ onImport }: Props): JSX.Element {
 
         <Row icon={<Sparkles size={16} strokeWidth={1.5} />} title="About" desc="">
           <div className="mono text-[12px] text-slate-400 leading-relaxed">
-            MultiZen v{info?.appVersion ?? "0.0.0"} · {info?.platform ?? "—"} · Tauri 2.x
+            Cloaksession v{info?.appVersion ?? "0.0.0"} · {info?.platform ?? "—"} · Tauri 2.x
           </div>
         </Row>
       </div>

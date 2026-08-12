@@ -1,6 +1,6 @@
 # tauri-app
 
-MultiZen desktop shell — the Tauri 2.x binary that wires the Rust backend
+Cloaksession desktop shell — the Tauri 2.x binary that wires the Rust backend
 (`multizen-core` / `profile-manager` / `browser-launcher` / `cdp-driver` /
 `mcp-server`) to the React UI in [`ui/`](ui/).
 

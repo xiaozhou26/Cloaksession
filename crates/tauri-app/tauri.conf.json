@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "MultiZen",
+  "productName": "Cloaksession",
   "version": "0.1.0",
-  "identifier": "com.multizen.browser",
+  "identifier": "com.cloaksession.browser",
   "build": {
     "beforeDevCommand": "npm run dev --prefix D:\\Rust\\multizen-browser-rs\\crates\\tauri-app\\ui",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "MultiZen",
+        "title": "Cloaksession",
         "width": 1200,
         "height": 800
       }

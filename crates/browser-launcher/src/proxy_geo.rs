@@ -63,7 +63,7 @@ pub async fn probe_proxy_geo(proxy: &ProxyConfig, timeout_ms: u64) -> Result<Pro
     let client = build_client(proxy, timeout_ms)?;
     let resp = client
         .get("https://ipapi.co/json/")
-        .header("user-agent", "MultiZen/0.2 (proxy-geo-probe)")
+        .header("user-agent", "Cloaksession/0.2 (proxy-geo-probe)")
         .header("accept", "application/json")
         .send()
         .await

@@ -94,6 +94,56 @@ impl BrowserSession {
         *guard = Some(page);
     }
 
+    /// Poll all open page targets whose URL contains `url_filter` for the
+    /// `data-mz-add-ext` DOM attribute. If found, the attribute is cleared
+    /// and its value is returned. This is the companion channel: the content
+    /// script on Chrome Web Store pages writes the extension id to
+    /// `<html data-mz-add-ext="…">` and the host polls it via
+    /// `Runtime.evaluate`. The DOM is shared across content-script worlds,
+    /// so this works even though CloakBrowser isolates content scripts.
+    ///
+    /// Returns the first non-empty attribute value found across all matching
+    /// pages, or `None` if no page has a signal.
+    pub async fn poll_companion_signal(&self, url_filter: &str) -> Result<Option<String>> {
+        let pages = self
+            .browser
+            .pages()
+            .await
+            .map_err(|e| MultizenError::Cdp(format!("pages: {e}")))?;
+
+        for page in pages {
+            // Check the URL — only poll Chrome Web Store pages.
+            let url = match page.evaluate("location.href").await {
+                Ok(eval) => eval
+                    .into_value::<serde_json::Value>()
+                    .ok()
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    .unwrap_or_default(),
+                Err(_) => continue, // page might be navigating — skip
+            };
+            if !url.contains(url_filter) {
+                continue;
+            }
+            // Read + clear the attribute atomically.
+            let expr = "(function(){var e=document.documentElement,v=e.getAttribute('data-mz-add-ext');if(v)e.removeAttribute('data-mz-add-ext');return v;})()";
+            match page.evaluate(expr).await {
+                Ok(eval) => {
+                    if let Ok(v) = eval.into_value::<serde_json::Value>() {
+                        if let Some(s) = v.as_str() {
+                            if !s.is_empty() {
+                                return Ok(Some(s.to_string()));
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Page might be navigating — skip.
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// safe-CDP gate check for a domain. Returns `true` if the domain is not
     /// yet enabled (`SafeEnableRefcount::should_enable`) AND CloakBrowser
     /// policy allows it (`cloak_allows_domain`). Plan 3 should call this

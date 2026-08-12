@@ -23,6 +23,7 @@ use tokio::sync::Mutex;
 
 use crate::commands::{
     activity::activity_recent,
+    archive::{profiles_export_archive, profiles_import_archive},
     dialog::{dialog_pick_browser_binary, dialog_pick_directory},
     extensions::{
         extensions_add_from_file, extensions_add_from_folder, extensions_add_from_web_store,
@@ -41,6 +42,7 @@ use crate::commands::{
     proxy::proxy_detect_geo,
     settings::{settings_get, settings_update},
     system::system_info,
+    update::{update_check, update_download, update_install, update_last_checked, update_status},
 };
 
 /// Process-wide shared state injected into Tauri via `Builder::manage`.
@@ -54,6 +56,7 @@ pub struct AppState {
     pub settings: Mutex<SettingsStore>,
     pub activity: Arc<ActivityLog>,
     pub mcp_token: Mutex<Option<String>>,
+    pub update: std::sync::Mutex<crate::commands::update::UpdateState>,
 }
 
 /// Resolve the on-disk paths for `profiles.db`, `profiles/`, and
@@ -125,7 +128,23 @@ fn build_app_state(app: &tauri::AppHandle) -> (AppState, PathBuf) {
         .filter(|s| !s.trim().is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(default_browser_binary);
-    let companion_dir = None;
+    // Set up the companion extension (injects "Add to Cloaksession" button on
+    // Chrome Web Store pages). Files are embedded at compile time and
+    // written to the data dir on startup so they survive across launches.
+    let companion_root = data_dir.join("companion");
+    std::fs::create_dir_all(&companion_root).ok();
+    let companion_manifest = include_str!("../resources/companion/manifest.json");
+    let companion_cs = include_str!("../resources/companion/cs.js");
+    let manifest_path = companion_root.join("manifest.json");
+    let cs_path = companion_root.join("cs.js");
+    // Only rewrite if content differs (avoid touching disk every launch).
+    let needs_write = std::fs::read_to_string(&manifest_path).ok().as_deref() != Some(companion_manifest)
+        || std::fs::read_to_string(&cs_path).ok().as_deref() != Some(companion_cs);
+    if needs_write {
+        std::fs::write(&manifest_path, companion_manifest).ok();
+        std::fs::write(&cs_path, companion_cs).ok();
+    }
+    let companion_dir = Some(companion_root);
 
     // Ensure the shared extensions directory exists so extension commands
     // can just write into `extensions_root/<ext_id>/`.
@@ -148,8 +167,112 @@ fn build_app_state(app: &tauri::AppHandle) -> (AppState, PathBuf) {
         settings: Mutex::new(store),
         activity: Arc::new(ActivityLog::new()),
         mcp_token: Mutex::new(None),
+        update: std::sync::Mutex::new(crate::commands::update::UpdateState::default()),
     };
     (state, data_dir)
+}
+
+/// Probe geo for every profile that has a proxy but no cached country code.
+/// Runs sequentially (don't hammer the upstream proxy). Emits a
+/// `profiles:proxy-country-updated` event after each successful probe so the
+/// renderer refetches and re-renders flag chips. Failures are non-fatal.
+async fn backfill_proxy_countries(
+    app: tauri::AppHandle,
+    driver: Arc<TauriBrowserDriver>,
+) {
+    let summaries = match driver.list_profiles().await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = ?e, "backfill: list_profiles failed");
+            return;
+        }
+    };
+    for summary in summaries {
+        // Skip profiles with no proxy or a cached country already.
+        if summary.proxy.is_none() || summary.proxy_country.is_some() {
+            continue;
+        }
+        let Some(proxy) = summary.proxy else { continue };
+        let proxy_config = multizen_core::ProxyConfig {
+            proxy_type: proxy.proxy_type,
+            host: proxy.host,
+            port: proxy.port,
+            username: proxy.username,
+            password: proxy.password,
+        };
+        match browser_launcher::proxy_geo::probe_proxy_geo(&proxy_config, 6_000).await {
+            Ok(geo) => {
+                let country = geo.country.to_lowercase();
+                let _ = driver
+                    .set_proxy_country(&summary.id, Some(country.clone()))
+                    .await;
+                let _ = app.emit(
+                    "profiles:proxy-country-updated",
+                    serde_json::json!({ "id": &summary.id, "country": country }),
+                );
+            }
+            Err(e) => {
+                tracing::debug!(error = ?e, profile = %summary.id, "backfill: probe failed");
+            }
+        }
+    }
+    tracing::info!("backfill_proxy_countries complete");
+}
+
+/// Delete extension directories in `extensions/` that no profile references.
+/// Best-effort — errors are logged and swallowed.
+async fn sweep_extension_orphans(driver: Arc<TauriBrowserDriver>) {
+    let extensions_root = driver.extensions_root().to_path_buf();
+
+    // Get all referenced extension dirs from profiles.
+    let referenced = match driver.store_entries().await {
+        Ok(entries) => entries
+            .into_iter()
+            .filter_map(|e| {
+                let p = PathBuf::from(&e.dir);
+                p.file_name().map(|n| n.to_string_lossy().to_string())
+            })
+            .collect::<std::collections::HashSet<_>>(),
+        Err(e) => {
+            tracing::warn!(error = ?e, "orphan sweep: store_entries failed");
+            return;
+        }
+    };
+
+    // Scan the extensions directory and remove unreferenced dirs.
+    let read_dir = match tokio::fs::read_dir(&extensions_root).await {
+        Ok(d) => d,
+        Err(_) => return, // dir doesn't exist yet — nothing to sweep.
+    };
+
+    let mut removed = 0u32;
+    let mut entries = read_dir;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = match path.file_name() {
+            Some(n) => n.to_string_lossy().to_string(),
+            None => continue,
+        };
+        // Skip temp dirs from interrupted unpacks.
+        if name.ends_with(".tmp_unpacked") {
+            let _ = tokio::fs::remove_dir_all(&path).await;
+            removed += 1;
+            continue;
+        }
+        if !referenced.contains(&name) {
+            if let Err(e) = tokio::fs::remove_dir_all(&path).await {
+                tracing::warn!(error = ?e, dir = %path.display(), "orphan sweep: remove failed");
+            } else {
+                removed += 1;
+            }
+        }
+    }
+    if removed > 0 {
+        tracing::info!(removed, "extension orphan sweep reclaimed");
+    }
 }
 
 /// Build the Tauri app and run it. Lives in the lib crate (not the bin)
@@ -158,6 +281,15 @@ fn build_app_state(app: &tauri::AppHandle) -> (AppState, PathBuf) {
 /// crate — keeping the handler list in the lib crate ensures the macro
 /// can see those generated names.
 pub fn run() {
+    // Initialize tracing subscriber so `tracing::info!`/`warn!` actually
+    // output to stderr. Controlled by RUST_LOG env var (default: info).
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .try_init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -237,7 +369,57 @@ pub fn run() {
                 }
             }
 
+            // Extract Arcs for background tasks before `state` is moved into
+            // `app.manage`.
+            let driver_for_backfill = state.driver.clone();
+            let driver_for_sweep = state.driver.clone();
+
             app.manage(state);
+
+            // Background: backfill proxy countries for profiles missing a
+            // cached country code. Runs sequentially so we don't hammer the
+            // same upstream proxy with parallel requests. Each probe emits
+            // a `profiles:proxy-country-updated` event so the renderer
+            // refetches and re-renders flag chips. Failures are non-fatal.
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    backfill_proxy_countries(app_handle, driver_for_backfill).await;
+                });
+            }
+
+            // Background: sweep the shared extensions/ dir for dirs no
+            // profile references (left by a crash mid-delete or manual
+            // removal). Best-effort, never blocks startup.
+            {
+                tauri::async_runtime::spawn(async move {
+                    sweep_extension_orphans(driver_for_sweep).await;
+                });
+            }
+
+            // Background: auto-check for updates 8s after launch if
+            // `autoUpdate` is enabled in settings (mirrors the original
+            // Electron `POST_LAUNCH_DELAY_MS` behavior). Non-fatal.
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+                    let auto_update = {
+                        let app_state = app_handle.state::<AppState>();
+                        let mut store = app_state.settings.lock().await;
+                        store.load().unwrap_or_default().auto_update
+                    };
+                    if auto_update {
+                        tracing::info!("auto-update: checking for updates");
+                        let app_state = app_handle.state::<AppState>();
+                        let _ = update_check(
+                            app_handle.clone(),
+                            app_state,
+                        ).await;
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -249,6 +431,9 @@ pub fn run() {
             profiles_delete,
             profiles_launch,
             profiles_close,
+            // archive
+            profiles_export_archive,
+            profiles_import_archive,
             // settings
             settings_get,
             settings_update,
@@ -267,6 +452,12 @@ pub fn run() {
             system_info,
             // activity
             activity_recent,
+            // update
+            update_status,
+            update_last_checked,
+            update_check,
+            update_install,
+            update_download,
             // extensions
             extensions_list,
             extensions_add_from_web_store,

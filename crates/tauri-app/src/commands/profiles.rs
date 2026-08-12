@@ -69,12 +69,26 @@ pub async fn profiles_delete(
 #[tauri::command]
 pub async fn profiles_launch(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     id: String,
 ) -> Result<LaunchedProfile, String> {
     // `BrowserDriver::launch` returns the full LaunchedProfile.
-    mcp_server::driver::BrowserDriver::launch(state.driver.as_ref(), &id)
+    let launched = mcp_server::driver::BrowserDriver::launch(state.driver.as_ref(), &id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // Spawn the companion poller for this profile — it watches Chrome Web
+    // Store pages for the "Add to Cloaksession" button signal and installs
+    // extensions when clicked. Non-fatal: if it fails, the user can still
+    // install extensions via the toolbar UI.
+    crate::commands::companion::spawn_companion_poller(
+        app,
+        state.driver.clone(),
+        state.driver.registry().clone(),
+        id,
+    );
+
+    Ok(launched)
 }
 
 #[tauri::command]

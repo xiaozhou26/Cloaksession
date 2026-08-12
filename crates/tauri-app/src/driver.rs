@@ -145,6 +145,10 @@ enum LauncherCmd {
         id: String,
         resp: oneshot::Sender<Result<()>>,
     },
+    InsertImported {
+        profile: multizen_core::Profile,
+        resp: oneshot::Sender<Result<multizen_core::Profile>>,
+    },
     // --- Extensions -----------------------------------------------------
     ListExtensions {
         id: String,
@@ -157,6 +161,11 @@ enum LauncherCmd {
     },
     StoreEntries {
         resp: oneshot::Sender<Result<Vec<multizen_core::ExtensionConfig>>>,
+    },
+    SetProxyCountry {
+        id: String,
+        country: Option<String>,
+        resp: oneshot::Sender<Result<()>>,
     },
 }
 
@@ -174,6 +183,9 @@ pub struct TauriBrowserDriver {
     /// extension is unpacked into `<extensions_root>/<ext_id>/` and
     /// referenced by `ExtensionConfig.dir` across profiles.
     extensions_root: PathBuf,
+    /// Profiles root directory (`<data_dir>/profiles/`). Each profile's
+    /// user data dir lives at `<profiles_root>/<profile_id>/`.
+    profiles_root: PathBuf,
     /// Sync cache of profile ids believed to be running. Updated on
     /// `launch`/`close`. Used by the sync `is_running` trait method because
     /// `BrowserLauncher::is_running_async` cannot be awaited from a sync
@@ -202,8 +214,9 @@ impl TauriBrowserDriver {
     ) -> Result<Self> {
         let (tx, rx) = mpsc::channel(CMD_CHANNEL_SIZE);
         let builder = std::thread::Builder::new().name("tauri-launcher".into());
+        let profiles_root_for_thread = profiles_root.clone();
         let handle = builder
-            .spawn(move || launcher_thread_main(db_path, profiles_root, rx))
+            .spawn(move || launcher_thread_main(db_path, profiles_root_for_thread, rx))
             .map_err(|e| MultizenError::Launch(format!("launcher thread spawn: {e}")))?;
         let _ = handle; // detached; exits on Shutdown or channel close
         Ok(Self {
@@ -213,6 +226,7 @@ impl TauriBrowserDriver {
             browser_binary,
             companion_dir,
             extensions_root,
+            profiles_root,
             running: StdMutex::new(HashSet::new()),
             app: StdMutex::new(None),
         })
@@ -221,6 +235,18 @@ impl TauriBrowserDriver {
     /// Get the shared extensions directory.
     pub fn extensions_root(&self) -> &Path {
         &self.extensions_root
+    }
+
+    /// Get the profile session registry (used by the companion poller to
+    /// obtain the `BrowserSession` for CDP polling).
+    pub fn registry(&self) -> &Arc<ProfileRegistry> {
+        &self.registry
+    }
+
+    /// Profiles root directory (`<data_dir>/profiles/`). Used by archive
+    /// import to compute the target data-dir path.
+    pub fn profiles_root(&self) -> &Path {
+        &self.profiles_root
     }
 
     /// Inject the Tauri `AppHandle` so `launch`/`close` can emit push events
@@ -334,6 +360,9 @@ async fn launcher_task(
             LauncherCmd::DeleteProfile { id, resp } => {
                 let _ = resp.send(pm.delete(&id));
             }
+            LauncherCmd::InsertImported { profile, resp } => {
+                let _ = resp.send(pm.insert_imported(profile));
+            }
             LauncherCmd::ListExtensions { id, resp } => {
                 let _ = resp.send(pm.get(&id).map(|opt| {
                     opt.and_then(|p| p.extensions).unwrap_or_default()
@@ -358,6 +387,9 @@ async fn launcher_task(
                     out
                 });
                 let _ = resp.send(result);
+            }
+            LauncherCmd::SetProxyCountry { id, country, resp } => {
+                let _ = resp.send(pm.set_proxy_country(&id, country.as_deref()));
             }
         }
     }
@@ -664,6 +696,20 @@ impl TauriBrowserDriver {
             .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))?
     }
 
+    pub async fn insert_imported(&self, profile: multizen_core::Profile) -> Result<multizen_core::Profile> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.launcher_tx
+            .send(LauncherCmd::InsertImported {
+                profile,
+                resp: resp_tx,
+            })
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
+        resp_rx
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))?
+    }
+
     // --- Extensions -----------------------------------------------------
 
     pub async fn list_extensions(&self, id: &str) -> Result<Vec<multizen_core::ExtensionConfig>> {
@@ -703,6 +749,25 @@ impl TauriBrowserDriver {
         let (resp_tx, resp_rx) = oneshot::channel();
         self.launcher_tx
             .send(LauncherCmd::StoreEntries { resp: resp_tx })
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
+        resp_rx
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))?
+    }
+
+    pub async fn set_proxy_country(
+        &self,
+        id: &str,
+        country: Option<String>,
+    ) -> Result<()> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.launcher_tx
+            .send(LauncherCmd::SetProxyCountry {
+                id: id.to_string(),
+                country,
+                resp: resp_tx,
+            })
             .await
             .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
         resp_rx

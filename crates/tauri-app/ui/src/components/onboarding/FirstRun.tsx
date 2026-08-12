@@ -11,7 +11,7 @@ const DEFAULT_NAME = "My first profile";
 /**
  * Three-step first-run: welcome → anonymous-usage consent → name a profile.
  * We omit the Anthropic-key step from the original Claude Design output because
- * MultiZen no longer calls any external API.
+ * Cloaksession no longer calls any external API.
  *
  * The telemetry step is a deliberate opt-in ASK (Homebrew's rule: no ping
  * before the notice). The heartbeat stays OFF unless the user clicks Enable —
@@ -138,7 +138,7 @@ export function FirstRun({ onCreate }: Props): JSX.Element {
                 className="font-bold tracking-tight text-slate-100"
                 style={{ fontSize: 26, lineHeight: 1.15, letterSpacing: "-0.01em" }}
               >
-                Help improve MultiZen?
+                Help improve Cloaksession?
               </div>
               <div className="text-[13px] text-slate-400 mt-2.5 leading-relaxed">
                 Optionally send an anonymous daily heartbeat: just app version and

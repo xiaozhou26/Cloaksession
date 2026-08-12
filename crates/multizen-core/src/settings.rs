@@ -31,7 +31,7 @@ impl Default for AppSettings {
             browser_engine: BrowserEngine::Cloakbrowser,
             browser_binary_path: None,
             skip_browser_download: false,
-            auto_update: true,
+            auto_update: false,
             usage_reporting: false,
         }
     }

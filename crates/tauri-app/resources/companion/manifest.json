@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Cloaksession Companion",
+  "version": "1.0.0",
+  "description": "Adds an \"Add to Cloaksession\" button on Chrome Web Store pages.",
+  "content_scripts": [
+    {
+      "matches": ["https://chromewebstore.google.com/detail/*"],
+      "js": ["cs.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ]
+}

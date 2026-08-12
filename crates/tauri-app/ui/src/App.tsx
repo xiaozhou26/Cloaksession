@@ -65,7 +65,7 @@ export function App(): JSX.Element {
       unlisten();
     };
   }, []);
-  // Global toast when the companion "Add to MultiZen" button installs an
+  // Global toast when the companion "Add to Cloaksession" button installs an
   // extension into a running profile (the edit sheet may not be open).
   useEffect(() => {
     let unlisten = (): void => {};
@@ -73,7 +73,7 @@ export function App(): JSX.Element {
     void onExtensionInstalled((e) => {
       showToast(
         e.ok
-          ? `Added "${e.extension.name}" — relaunch the profile to apply`
+          ? `Added "${e.extension.name}" — profile is reopening…`
           : `Extension install failed: ${e.error}`,
       );
     }).then((fn) => {
