@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.multizen.browser",
   "build": {
-    "beforeDevCommand": "cd ui && npm run dev",
+    "beforeDevCommand": "npm run dev --prefix D:\\Rust\\multizen-browser-rs\\crates\\tauri-app\\ui",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "cd ui && npm run build",
+    "beforeBuildCommand": "npm run build --prefix D:\\Rust\\multizen-browser-rs\\crates\\tauri-app\\ui",
     "frontendDist": "../ui/dist"
   },
   "app": {
