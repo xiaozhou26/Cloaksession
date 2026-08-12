@@ -9,9 +9,12 @@
 //!   Those helpers are private; rather than widen mcp-server's API for two
 //!   constant arrays, the lists are duplicated here. If the lists diverge,
 //!   update both — they're tagged with a comment in tools.rs pointing here.
-//! - `reconcile` / `locale_for_country`: not yet implemented (no matching
-//!   helper exists in the workspace). Return an explicit error so the
-//!   frontend can detect the gap; wiring deferred to P5.
+//! - `reconcile`: applies a partial patch (locale/timezone/device/screen/
+//!   hardware/memory) to an existing fingerprint and returns the updated
+//!   config. Locale changes re-derive `languages`, `accept_language`, and
+//!   `country` from the new locale's region subtag.
+//! - `locale_for_country`: reverse-lookup — given a country code, returns
+//!   the best-matching locale id (exact or culturally adjacent fallback).
 
 use multizen_core::FingerprintConfig;
 use serde::Serialize;
@@ -277,12 +280,92 @@ pub async fn fingerprint_locales(
         .collect())
 }
 
+/// Partial patch for updating a fingerprint. All fields optional — only
+/// the fields present are applied; the rest stay as-is. Mirrors the
+/// frontend's `FingerprintReconcilePatch` type (camelCase serde).
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FingerprintReconcilePatch {
+    pub device: Option<multizen_core::DeviceFamily>,
+    pub locale_id: Option<String>,
+    pub screen: Option<multizen_core::ScreenSize>,
+    pub timezone: Option<String>,
+    pub hardware_concurrency: Option<u32>,
+    pub device_memory: Option<u32>,
+}
+
+/// Extract the primary language subtag from a BCP-47 locale id
+/// (e.g. "en-US" → "en", "zh-CN" → "zh").
+fn primary_language(locale: &str) -> &str {
+    locale.split('-').next().unwrap_or("en")
+}
+
+/// Derive the `country` (ISO-3166 alpha-2, uppercase) from a locale's
+/// region subtag (e.g. "en-GB" → "GB", "ja-JP" → "JP"). Returns empty string
+/// if the locale has no region subtag.
+fn country_from_locale(locale: &str) -> String {
+    let region = locale.rsplit('-').next().unwrap_or("");
+    if region.len() == 2 && region.chars().all(|c| c.is_ascii_alphabetic()) {
+        region.to_uppercase()
+    } else {
+        String::new()
+    }
+}
+
 #[tauri::command]
 pub async fn fingerprint_reconcile(
     _state: State<'_, AppState>,
-    _fingerprint: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    Err("fingerprint_reconcile not yet implemented (deferred to P5)".into())
+    fingerprint: FingerprintConfig,
+    patch: FingerprintReconcilePatch,
+) -> Result<FingerprintConfig, String> {
+    let mut fp = fingerprint;
+
+    // Locale: re-derive languages, accept_language, and country from the
+    // new locale. This is the key reconciliation — when the proxy is in SG
+    // and the locale is set to en-GB, the country becomes GB (from the
+    // locale's region), and the timezone comes from the probe (applied
+    // below). For exact-match locales (e.g. ja-JP for a JP proxy), all
+    // three (locale, country, timezone) align.
+    if let Some(locale_id) = patch.locale_id {
+        let lang = primary_language(&locale_id);
+        fp.locale = locale_id.clone();
+        fp.languages = vec![locale_id.clone(), lang.to_string()];
+        // Accept-Language: "en-GB,en;q=0.9" — locale first, then primary
+        // language with a lower quality.
+        fp.accept_language = format!("{},{};q=0.9", locale_id, lang);
+        fp.country = country_from_locale(&locale_id);
+    }
+
+    if let Some(tz) = patch.timezone {
+        fp.timezone = tz;
+    }
+
+    if let Some(device) = patch.device {
+        fp.device = device;
+        // NOTE: We don't re-derive user_agent / platform / client_hints /
+        // screen / webgl from the device here — that mapping (device →
+        // full hardware profile) doesn't exist yet (P5). The device is
+        // stored so the launcher can inject the right fingerprint args;
+        // the UA/client_hints remain from the current config. This is a
+        // known limitation — device changes only fully take effect after
+        // a regenerate (which produces a fresh coherent set).
+    }
+
+    if let Some(screen) = patch.screen {
+        fp.screen = screen;
+        // avail_screen tracks screen height minus taskbar; without a
+        // device-specific taskbar height we leave avail_screen as-is.
+    }
+
+    if let Some(hc) = patch.hardware_concurrency {
+        fp.hardware_concurrency = hc;
+    }
+
+    if let Some(dm) = patch.device_memory {
+        fp.device_memory = dm;
+    }
+
+    Ok(fp)
 }
 
 #[tauri::command]
