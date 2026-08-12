@@ -25,6 +25,9 @@ pub enum MultizenError {
 
     #[error("cdp error: {0}")]
     Cdp(String),
+
+    #[error("mcp error: {0}")]
+    Mcp(String),
 }
 
 pub type Result<T> = std::result::Result<T, MultizenError>;

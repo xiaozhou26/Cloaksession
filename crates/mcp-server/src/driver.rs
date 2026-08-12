@@ -1,0 +1,1 @@
+//! BrowserDriver trait definition.

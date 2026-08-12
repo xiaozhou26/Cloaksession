@@ -1,0 +1,1 @@
+//! Browser activity history tracking.

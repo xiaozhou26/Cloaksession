@@ -1,0 +1,22 @@
+[package]
+name = "mcp-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+multizen-core = { path = "../multizen-core" }
+profile-manager = { path = "../profile-manager" }
+browser-launcher = { path = "../browser-launcher" }
+cdp-driver = { path = "../cdp-driver" }
+rmcp = "0.1"
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "sync", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+tracing = "0.1"
+subtle = "2"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
