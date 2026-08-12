@@ -5,6 +5,10 @@
 /.idea/
 /.vscode/
 
+# Trellis / Claude Code local config
+/.claude/
+/.trellis/
+
 # Tauri dev logs
 tauri-*.log
 

@@ -16,8 +16,8 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::AppState;
 
-const GITHUB_OWNER: &str = "multizenteam";
-const GITHUB_REPO: &str = "multizen-browser";
+const GITHUB_OWNER: &str = "xiaozhou26";
+const GITHUB_REPO: &str = "Cloaksession";
 
 // ---------------------------------------------------------------------------
 // Types
