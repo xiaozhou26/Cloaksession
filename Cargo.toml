@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/multizen-core",
+    "crates/profile-manager",
+    "crates/settings-store",
+]
