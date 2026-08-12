@@ -6,6 +6,7 @@
 
 pub mod activity;
 pub mod dialog;
+pub mod extensions;
 pub mod fingerprint;
 pub mod profiles;
 pub mod proxy;

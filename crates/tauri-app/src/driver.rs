@@ -44,7 +44,7 @@
 //! `BrowserDriver::launch(&self, profile_id)` has no parameter for them.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
@@ -145,6 +145,19 @@ enum LauncherCmd {
         id: String,
         resp: oneshot::Sender<Result<()>>,
     },
+    // --- Extensions -----------------------------------------------------
+    ListExtensions {
+        id: String,
+        resp: oneshot::Sender<Result<Vec<multizen_core::ExtensionConfig>>>,
+    },
+    SetExtensions {
+        id: String,
+        exts: Vec<multizen_core::ExtensionConfig>,
+        resp: oneshot::Sender<Result<Vec<multizen_core::ExtensionConfig>>>,
+    },
+    StoreEntries {
+        resp: oneshot::Sender<Result<Vec<multizen_core::ExtensionConfig>>>,
+    },
 }
 
 pub struct TauriBrowserDriver {
@@ -157,6 +170,10 @@ pub struct TauriBrowserDriver {
     engine: BrowserEngine,
     browser_binary: PathBuf,
     companion_dir: Option<PathBuf>,
+    /// Shared extensions directory (`<data_dir>/extensions/`). Each
+    /// extension is unpacked into `<extensions_root>/<ext_id>/` and
+    /// referenced by `ExtensionConfig.dir` across profiles.
+    extensions_root: PathBuf,
     /// Sync cache of profile ids believed to be running. Updated on
     /// `launch`/`close`. Used by the sync `is_running` trait method because
     /// `BrowserLauncher::is_running_async` cannot be awaited from a sync
@@ -177,6 +194,7 @@ impl TauriBrowserDriver {
     pub fn start(
         db_path: PathBuf,
         profiles_root: PathBuf,
+        extensions_root: PathBuf,
         registry: Arc<ProfileRegistry>,
         engine: BrowserEngine,
         browser_binary: PathBuf,
@@ -194,9 +212,15 @@ impl TauriBrowserDriver {
             engine,
             browser_binary,
             companion_dir,
+            extensions_root,
             running: StdMutex::new(HashSet::new()),
             app: StdMutex::new(None),
         })
+    }
+
+    /// Get the shared extensions directory.
+    pub fn extensions_root(&self) -> &Path {
+        &self.extensions_root
     }
 
     /// Inject the Tauri `AppHandle` so `launch`/`close` can emit push events
@@ -309,6 +333,31 @@ async fn launcher_task(
             }
             LauncherCmd::DeleteProfile { id, resp } => {
                 let _ = resp.send(pm.delete(&id));
+            }
+            LauncherCmd::ListExtensions { id, resp } => {
+                let _ = resp.send(pm.get(&id).map(|opt| {
+                    opt.and_then(|p| p.extensions).unwrap_or_default()
+                }));
+            }
+            LauncherCmd::SetExtensions { id, exts, resp } => {
+                let result = pm.update(&id, UpdateProfileInput {
+                    extensions: Some(exts),
+                    ..Default::default()
+                }).map(|p| p.extensions.unwrap_or_default());
+                let _ = resp.send(result);
+            }
+            LauncherCmd::StoreEntries { resp } => {
+                let result = pm.all_extension_refs().map(|refs| {
+                    let mut seen = std::collections::HashSet::new();
+                    let mut out = Vec::new();
+                    for r in refs {
+                        if seen.insert(r.ext.id.clone()) {
+                            out.push(r.ext);
+                        }
+                    }
+                    out
+                });
+                let _ = resp.send(result);
             }
         }
     }
@@ -608,6 +657,52 @@ impl TauriBrowserDriver {
                 id: id.to_string(),
                 resp: resp_tx,
             })
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
+        resp_rx
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))?
+    }
+
+    // --- Extensions -----------------------------------------------------
+
+    pub async fn list_extensions(&self, id: &str) -> Result<Vec<multizen_core::ExtensionConfig>> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.launcher_tx
+            .send(LauncherCmd::ListExtensions {
+                id: id.to_string(),
+                resp: resp_tx,
+            })
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
+        resp_rx
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))?
+    }
+
+    pub async fn set_extensions(
+        &self,
+        id: &str,
+        exts: Vec<multizen_core::ExtensionConfig>,
+    ) -> Result<Vec<multizen_core::ExtensionConfig>> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.launcher_tx
+            .send(LauncherCmd::SetExtensions {
+                id: id.to_string(),
+                exts,
+                resp: resp_tx,
+            })
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
+        resp_rx
+            .await
+            .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))?
+    }
+
+    pub async fn store_entries(&self) -> Result<Vec<multizen_core::ExtensionConfig>> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.launcher_tx
+            .send(LauncherCmd::StoreEntries { resp: resp_tx })
             .await
             .map_err(|_| MultizenError::Mcp("launcher thread closed".into()))?;
         resp_rx

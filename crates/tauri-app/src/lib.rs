@@ -24,6 +24,12 @@ use tokio::sync::Mutex;
 use crate::commands::{
     activity::activity_recent,
     dialog::{dialog_pick_browser_binary, dialog_pick_directory},
+    extensions::{
+        extensions_add_from_file, extensions_add_from_folder, extensions_add_from_web_store,
+        extensions_icon, extensions_list, extensions_prepare_from_file,
+        extensions_prepare_from_folder, extensions_prepare_from_web_store,
+        extensions_remove, extensions_store_entries, extensions_toggle,
+    },
     fingerprint::{
         fingerprint_devices, fingerprint_generate, fingerprint_locale_for_country,
         fingerprint_locales, fingerprint_reconcile,
@@ -54,7 +60,7 @@ pub struct AppState {
 /// `settings.json` from the Tauri app handle. Uses `app_local_data_dir`
 /// (e.g. `%LOCALAPPDATA%\com.multizen.browser` on Windows) and falls back
 /// to `app_config_dir` then the current working directory.
-fn resolve_paths(app: &tauri::AppHandle) -> (PathBuf, PathBuf, PathBuf) {
+fn resolve_paths(app: &tauri::AppHandle) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
     let base = app
         .path()
         .app_local_data_dir()
@@ -62,8 +68,9 @@ fn resolve_paths(app: &tauri::AppHandle) -> (PathBuf, PathBuf, PathBuf) {
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
     let db_path = base.join("profiles.db");
     let profiles_root = base.join("profiles");
+    let extensions_root = base.join("extensions");
     let settings_path = default_settings_path(&base);
-    (db_path, profiles_root, settings_path)
+    (db_path, profiles_root, extensions_root, settings_path)
 }
 
 /// Fallback browser binary path when settings has none. Looks for
@@ -98,7 +105,7 @@ fn default_browser_binary() -> PathBuf {
 /// Returns the state plus the resolved data-dir path (used by callers
 /// to locate the `mcp-token` file).
 fn build_app_state(app: &tauri::AppHandle) -> (AppState, PathBuf) {
-    let (db_path, profiles_root, settings_path) = resolve_paths(app);
+    let (db_path, profiles_root, extensions_root, settings_path) = resolve_paths(app);
     let data_dir = settings_path
         .parent()
         .map(Path::to_path_buf)
@@ -120,10 +127,15 @@ fn build_app_state(app: &tauri::AppHandle) -> (AppState, PathBuf) {
         .unwrap_or_else(default_browser_binary);
     let companion_dir = None;
 
+    // Ensure the shared extensions directory exists so extension commands
+    // can just write into `extensions_root/<ext_id>/`.
+    std::fs::create_dir_all(&extensions_root).ok();
+
     let registry = Arc::new(ProfileRegistry::new());
     let driver = TauriBrowserDriver::start(
         db_path,
         profiles_root,
+        extensions_root,
         registry,
         engine,
         browser_binary,
@@ -255,6 +267,18 @@ pub fn run() {
             system_info,
             // activity
             activity_recent,
+            // extensions
+            extensions_list,
+            extensions_add_from_web_store,
+            extensions_add_from_file,
+            extensions_add_from_folder,
+            extensions_remove,
+            extensions_toggle,
+            extensions_store_entries,
+            extensions_prepare_from_web_store,
+            extensions_prepare_from_file,
+            extensions_prepare_from_folder,
+            extensions_icon,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

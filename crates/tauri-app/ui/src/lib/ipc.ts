@@ -256,37 +256,28 @@ export const proxy = {
 // ---------------------------------------------------------------------------
 
 export const extensions = {
-  list: (_profileId: string): Promise<ExtensionConfig[]> =>
-    notImplemented("extensions.list"),
-  addFromFile: (_profileId: string): Promise<ExtensionConfig[]> =>
-    notImplemented("extensions.addFromFile"),
-  addFromFolder: (_profileId: string): Promise<ExtensionConfig[]> =>
-    notImplemented("extensions.addFromFolder"),
-  addFromWebStore: (
-    _profileId: string,
-    _urlOrId: string,
-  ): Promise<ExtensionConfig[]> => notImplemented("extensions.addFromWebStore"),
-  remove: (
-    _profileId: string,
-    _extId: string,
-  ): Promise<ExtensionConfig[]> => notImplemented("extensions.remove"),
-  toggle: (
-    _profileId: string,
-    _extId: string,
-    _enabled: boolean,
-  ): Promise<ExtensionConfig[]> => notImplemented("extensions.toggle"),
+  list: (profileId: string): Promise<ExtensionConfig[]> =>
+    invoke<ExtensionConfig[]>("extensions_list", { profileId }),
+  addFromWebStore: (profileId: string, urlOrId: string): Promise<ExtensionConfig[]> =>
+    invoke<ExtensionConfig[]>("extensions_add_from_web_store", { profileId, urlOrId }),
+  addFromFile: (profileId: string): Promise<ExtensionConfig[]> =>
+    invoke<ExtensionConfig[]>("extensions_add_from_file", { profileId }),
+  addFromFolder: (profileId: string): Promise<ExtensionConfig[]> =>
+    invoke<ExtensionConfig[]>("extensions_add_from_folder", { profileId }),
+  remove: (profileId: string, extId: string): Promise<ExtensionConfig[]> =>
+    invoke<ExtensionConfig[]>("extensions_remove", { profileId, extId }),
+  toggle: (profileId: string, extId: string, enabled: boolean): Promise<ExtensionConfig[]> =>
+    invoke<ExtensionConfig[]>("extensions_toggle", { profileId, extId, enabled }),
   storeEntries: (): Promise<ExtensionConfig[]> =>
-    notImplemented("extensions.storeEntries"),
-  prepareFromWebStore: (_urlOrId: string): Promise<ExtensionConfig> =>
-    notImplemented("extensions.prepareFromWebStore"),
+    invoke<ExtensionConfig[]>("extensions_store_entries"),
+  prepareFromWebStore: (urlOrId: string): Promise<ExtensionConfig> =>
+    invoke<ExtensionConfig>("extensions_prepare_from_web_store", { urlOrId }),
   prepareFromFile: (): Promise<ExtensionConfig | null> =>
-    notImplemented("extensions.prepareFromFile"),
+    invoke<ExtensionConfig | null>("extensions_prepare_from_file"),
   prepareFromFolder: (): Promise<ExtensionConfig | null> =>
-    notImplemented("extensions.prepareFromFolder"),
-  icon: (
-    _ext: ExtensionConfig,
-    _profileId: string | null,
-  ): Promise<string | null> => notImplemented("extensions.icon"),
+    invoke<ExtensionConfig | null>("extensions_prepare_from_folder"),
+  icon: (ext: ExtensionConfig, profileId: string | null): Promise<string | null> =>
+    invoke<string | null>("extensions_icon", { ext, profileId }),
 };
 
 // ---------------------------------------------------------------------------
