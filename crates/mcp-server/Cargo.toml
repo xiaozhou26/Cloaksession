@@ -8,6 +8,7 @@ multizen-core = { path = "../multizen-core" }
 profile-manager = { path = "../profile-manager" }
 browser-launcher = { path = "../browser-launcher" }
 cdp-driver = { path = "../cdp-driver" }
+async-trait = "0.1"
 rmcp = "0.1"
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "sync", "macros"] }
