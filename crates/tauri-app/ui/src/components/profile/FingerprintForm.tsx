@@ -112,9 +112,12 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
     }
   }
 
-  // Proxy-coherence warning: locale country must match detected proxy country.
+  // Proxy-coherence warning: locale country must match detected proxy
+  // country. Case-insensitive — the fingerprint stores uppercase (e.g.
+  // "SG") while the geo probe returns lowercase (e.g. "sg").
   const showProxyMismatch =
-    detected && fingerprint.country !== detected.country;
+    detected &&
+    fingerprint.country.toUpperCase() !== detected.country.toUpperCase();
 
   return (
     <div className="space-y-3">
