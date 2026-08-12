@@ -9,6 +9,19 @@ pub async fn bootstrap_targets(
     engine: BrowserEngine,
     webrtc_spoof_ip: Option<&str>,
 ) -> Result<()> {
+    // C1: document the existing correct behavior. For CloakBrowser, only
+    // the locale evaluate runs below (webrtc/preload are gated to CFT), and
+    // CloakBrowser relies on launch-time `--fingerprint-*` flags (P2.5)
+    // rather than bootstrap emulation. Log it so integrators understand why
+    // bootstrap is a no-op for CloakBrowser.
+    if engine == BrowserEngine::Cloakbrowser {
+        tracing::warn!(
+            engine = "cloakbrowser",
+            "full bootstrap emulation is CFT-only; CloakBrowser relies on launch-time \
+             --fingerprint-* flags. Only the locale evaluate will run (single evaluate, \
+             not a domain enable — safe under the safe_cdp gate)."
+        );
+    }
     let pages = session
         .browser
         .pages()

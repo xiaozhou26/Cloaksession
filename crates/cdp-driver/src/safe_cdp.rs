@@ -1,3 +1,16 @@
+//! Safe-CDP gate: refcount of which CDP domains are currently enabled, plus
+//! CloakBrowser policy. On CloakBrowser, enabling `Runtime` or `Network`
+//! trips a DCHECK in the patched browser and crashes the process, so
+//! `cloak_allows_domain` returns `false` for those domains.
+//!
+//! Full enforcement (wrapping every chromiumoxide CDP call that could enable
+//! a domain, or a custom `Client::connect` that suppresses `Runtime.enable`)
+//! is deferred to Plan 3 — chromiumoxide auto-enables `Runtime` and `Page`
+//! on `Browser::connect`/`new_page`, which is hard to suppress without
+//! forking. For now, `BrowserSession::safe_enable_check` exposes the gate
+//! state as observability (`tracing::debug!` in tools) and as a real API
+//! for Plan 3 to call before issuing domain-enabling CDP commands.
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 

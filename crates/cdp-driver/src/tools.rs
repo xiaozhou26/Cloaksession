@@ -17,11 +17,25 @@ pub struct NavResult {
 
 impl super::session::BrowserSession {
     pub async fn navigate(&self, url: &str, timeout_ms: u64) -> Result<NavResult> {
-        let page = self
-            .browser
-            .new_page("about:blank")
-            .await
-            .map_err(|e| MultizenError::Cdp(format!("new_page: {e}")))?;
+        // I1: reuse the active page if one exists; otherwise create a new
+        // page navigating directly to `url`. Store the page as active so
+        // screenshot/evaluate/click/type_text/extract all act on the same
+        // page navigate just touched.
+        let page = match self.active_page().await {
+            Ok(p) => p,
+            Err(_) => {
+                // No page yet — create one. chromiumoxide's `new_page`
+                // accepts the URL and navigates.
+                let p = self
+                    .browser
+                    .new_page(url)
+                    .await
+                    .map_err(|e| MultizenError::Cdp(format!("new_page: {e}")))?;
+                self.set_active_page(p.clone()).await;
+                p
+            }
+        };
+        // If we reused an existing page, navigate it to `url`.
         page.goto(url)
             .await
             .map_err(|e| MultizenError::Cdp(format!("goto: {e}")))?;
@@ -31,6 +45,17 @@ impl super::session::BrowserSession {
             tokio::time::sleep(Duration::from_millis(100)).await;
         })
         .await;
+
+        // C1: observability — surface when the safe-CDP gate would block
+        // `Runtime` (chromiumoxide already auto-enabled it; this is not
+        // enforcement, just visibility for Plan 3).
+        if !self.safe_enable_check("Runtime") {
+            tracing::debug!(
+                engine = ?self.engine,
+                "safe_cdp gate would block Runtime; chromiumoxide auto-enabled it (observability)"
+            );
+        }
+
         let eval = page
             .evaluate("({url: location.href, title: document.title})")
             .await
@@ -45,14 +70,7 @@ impl super::session::BrowserSession {
     }
 
     pub async fn screenshot(&self) -> Result<String> {
-        let page = self
-            .browser
-            .pages()
-            .await
-            .map_err(|e| MultizenError::Cdp(format!("pages: {e}")))?
-            .into_iter()
-            .next()
-            .ok_or_else(|| MultizenError::Cdp("no page".into()))?;
+        let page = self.active_page().await?;
         let bytes = page
             .screenshot(
                 ScreenshotParams::builder()
@@ -65,14 +83,16 @@ impl super::session::BrowserSession {
     }
 
     pub async fn evaluate(&self, expression: &str) -> Result<serde_json::Value> {
-        let page = self
-            .browser
-            .pages()
-            .await
-            .map_err(|e| MultizenError::Cdp(format!("pages: {e}")))?
-            .into_iter()
-            .next()
-            .ok_or_else(|| MultizenError::Cdp("no page".into()))?;
+        let page = self.active_page().await?;
+
+        // C1: observability for the Runtime domain gate.
+        if !self.safe_enable_check("Runtime") {
+            tracing::debug!(
+                engine = ?self.engine,
+                "safe_cdp gate would block Runtime; chromiumoxide auto-enabled it (observability)"
+            );
+        }
+
         let eval = page
             .evaluate(expression)
             .await
@@ -87,14 +107,7 @@ impl super::session::BrowserSession {
     // injection (humanized_path for mouse approach, humanized_keystroke_delays
     // for typing). Implemented per Task 12 with chromiumoxide 0.7 input API.
     pub async fn click(&self, selector: &str) -> Result<()> {
-        let page = self
-            .browser
-            .pages()
-            .await
-            .map_err(|e| MultizenError::Cdp(format!("pages: {e}")))?
-            .into_iter()
-            .next()
-            .ok_or_else(|| MultizenError::Cdp("no page".into()))?;
+        let page = self.active_page().await?;
         // Find + scrollIntoView + get center.
         let expr = format!(
             r#"(function() {{
@@ -156,14 +169,7 @@ impl super::session::BrowserSession {
     }
 
     pub async fn type_text(&self, selector: &str, text: &str) -> Result<()> {
-        let page = self
-            .browser
-            .pages()
-            .await
-            .map_err(|e| MultizenError::Cdp(format!("pages: {e}")))?
-            .into_iter()
-            .next()
-            .ok_or_else(|| MultizenError::Cdp("no page".into()))?;
+        let page = self.active_page().await?;
         // Focus the target element.
         let focus_expr = format!(
             r#"(function(){{var el=document.querySelector({selector:?});if(el){{el.focus();return true;}}return false;}})()"#
@@ -194,14 +200,7 @@ impl super::session::BrowserSession {
     }
 
     pub async fn extract(&self) -> Result<serde_json::Value> {
-        let page = self
-            .browser
-            .pages()
-            .await
-            .map_err(|e| MultizenError::Cdp(format!("pages: {e}")))?
-            .into_iter()
-            .next()
-            .ok_or_else(|| MultizenError::Cdp("no page".into()))?;
+        let page = self.active_page().await?;
         let meta = page
             .evaluate("({url: location.href, title: document.title})")
             .await
