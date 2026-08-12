@@ -292,6 +292,12 @@ pub struct FingerprintReconcilePatch {
     pub timezone: Option<String>,
     pub hardware_concurrency: Option<u32>,
     pub device_memory: Option<u32>,
+    /// Override the country (ISO-3166 alpha-2). When the locale is a
+    /// culturally-adjacent fallback (e.g. en-GB for a SG proxy), the
+    /// locale's own region (GB) would produce a wrong country. The caller
+    /// passes the proxy's detected country so the fingerprint country
+    /// matches the actual exit IP.
+    pub country: Option<String>,
 }
 
 /// Extract the primary language subtag from a BCP-47 locale id
@@ -338,6 +344,14 @@ pub async fn fingerprint_reconcile(
 
     if let Some(tz) = patch.timezone {
         fp.timezone = tz;
+    }
+
+    // Country override: when the locale is a fallback (e.g. en-GB for a
+    // SG proxy), the locale-derived country (GB) would mismatch the
+    // proxy's actual country (SG). The caller passes the proxy's detected
+    // country so the fingerprint country matches the exit IP.
+    if let Some(country) = patch.country {
+        fp.country = country.to_uppercase();
     }
 
     if let Some(device) = patch.device {

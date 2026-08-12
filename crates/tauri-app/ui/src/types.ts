@@ -302,6 +302,7 @@ export interface FingerprintReconcilePatch {
   timezone?: string;
   hardwareConcurrency?: number;
   deviceMemory?: number;
+  country?: string;
 }
 
 export interface ProxyGeoResult {

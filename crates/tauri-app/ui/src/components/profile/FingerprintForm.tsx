@@ -95,7 +95,16 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
       // would recreate the locale/timezone mismatch anti-bot systems flag
       // (e.g. en-GB locale + Europe/London tz for a Singapore proxy).
       const tz = geo.timezone || match.timezones[0];
-      await reconcile({ localeId: match.id, timezone: tz });
+      // Pass the proxy's detected country so the fingerprint country
+      // matches the exit IP even when the locale is a fallback (e.g.
+      // en-GB locale for a SG proxy — without this, country would be GB
+      // from the locale, mismatching the SG proxy and re-triggering the
+      // anti-bot warning).
+      await reconcile({
+        localeId: match.id,
+        timezone: tz,
+        country: geo.country.toUpperCase(),
+      });
     } catch (e) {
       setDetectError((e as Error).message);
     } finally {
