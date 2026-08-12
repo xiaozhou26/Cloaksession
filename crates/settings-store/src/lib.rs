@@ -1,2 +1,2 @@
 pub mod defaults;
-pub use defaults::{AppSettings, BrowserEngine, SettingsStore, default_settings_path};
+pub use defaults::{default_settings_path, SettingsStore};
