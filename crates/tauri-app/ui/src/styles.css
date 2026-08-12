@@ -1,0 +1,294 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: #0a0b0f;
+    color: #f1f5f9;
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "ss02", "cv01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow: hidden;
+  }
+  :focus-visible {
+    outline: 2px solid rgba(168, 85, 247, 0.4);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: rgba(168, 85, 247, 0.5);
+    color: white;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    border: 2px solid #0a0b0f;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  code,
+  kbd,
+  pre,
+  .mono {
+    font-family: var(--font-mono);
+    font-feature-settings: "ss01";
+  }
+}
+
+/* Brand cube logo gradient (used as fallback when image fails) */
+.cube-fallback {
+  background: linear-gradient(135deg, #ff6b35 0%, #ff3d8a 35%, #8b5cf6 70%, #3b82f6 100%);
+}
+
+/* Atoms used across the app */
+.mz-card {
+  background: rgba(255, 255, 255, 0.02);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  border-radius: 16px;
+  backdrop-filter: blur(20px);
+}
+
+.mz-panel {
+  background: rgba(255, 255, 255, 0.02);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+}
+
+.mz-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 10px;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+}
+
+.mz-kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #94a3b8;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* Hover/active treatment shared by all <Button>s — variant tokens live in Button.tsx */
+.mz-button {
+  border: 0;
+  cursor: pointer;
+  letter-spacing: 0.005em;
+  -webkit-app-region: no-drag;
+}
+.mz-button:hover:not(:disabled)[data-variant="primary"] {
+  filter: brightness(1.06);
+}
+.mz-button:hover:not(:disabled)[data-variant="secondary"] {
+  background: rgba(255, 255, 255, 0.07) !important;
+}
+.mz-button:hover:not(:disabled)[data-variant="ghost"] {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: #cbd5e1 !important;
+}
+.mz-button:hover:not(:disabled)[data-variant="accent"] {
+  background: rgba(168, 85, 247, 0.16) !important;
+}
+.mz-button:hover:not(:disabled)[data-variant="success"] {
+  background: rgba(16, 185, 129, 0.16) !important;
+}
+.mz-button:hover:not(:disabled)[data-variant="warning"] {
+  background: rgba(245, 158, 11, 0.16) !important;
+}
+.mz-button:hover:not(:disabled)[data-variant="danger"] {
+  background: rgba(239, 68, 68, 0.14) !important;
+}
+.mz-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Legacy classes kept until call sites migrate to <Button> — same look as
+   primary / secondary / ghost variants so we can swap incrementally. */
+.btn-brand {
+  background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+  color: white;
+  font-weight: 600;
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow:
+    0 6px 20px -6px rgba(168, 85, 247, 0.45),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+  transition: all 150ms ease-out;
+}
+.btn-brand:hover { filter: brightness(1.06); }
+.btn-brand:active { transform: scale(0.97); }
+.btn-brand:disabled { opacity: 0.5; pointer-events: none; }
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.04);
+  color: #cbd5e1;
+  font-weight: 500;
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition: all 150ms ease-out;
+}
+.btn-secondary:hover { background: rgba(255, 255, 255, 0.07); }
+.btn-secondary:active { transform: scale(0.97); }
+
+.btn-ghost {
+  background: transparent;
+  color: #94a3b8;
+  font-weight: 500;
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  transition: all 150ms ease-out;
+}
+.btn-ghost:hover {
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.04);
+}
+.btn-ghost:active { transform: scale(0.97); }
+
+/* Pulsing dot used in 'live' / 'running' / 'ai' states */
+@keyframes mz-dotpulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes mz-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 0.6;
+  }
+  70% {
+    box-shadow: 0 0 0 8px transparent;
+    opacity: 0;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    opacity: 0;
+  }
+}
+
+@keyframes mz-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes mz-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes mz-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mz-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes mz-modal-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.mz-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.02) 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  background-size: 200% 100%;
+  animation: mz-shimmer 1.4s linear infinite;
+}
+
+.drag-region {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Flag-icons sizing override — keep them tight in our UI */
+.fi {
+  width: 14px;
+  height: 10.5px;
+  display: inline-block;
+  vertical-align: -1px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+.fi.fi-lg {
+  width: 18px;
+  height: 13px;
+  vertical-align: -2px;
+}

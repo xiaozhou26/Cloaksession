@@ -221,20 +221,41 @@ export interface ActivityEvent {
 
 // ---------------------------------------------------------------------------
 // Push event payloads (crates/tauri-app/src/driver.rs)
+//
+// NOTE: the on-wire Rust payloads are flat `{ profileId, status, error }`
+// (chromium) and `{ profileId, running }` (running-changed). The migrated
+// renderer, however, was written against the legacy Electron preload which
+// used discriminated-union shapes (`kind` tag). For P4.7 we keep the
+// renderer's expected shapes so it compiles; the Tauri runtime payload is
+// structurally different, so these listeners effectively degrade until
+// P4.8 reconciles them. This is the documented "functional degradation
+// acceptable" path for the scope-excluded chromium feature.
 // ---------------------------------------------------------------------------
 
-/** `profiles:running-changed` payload. */
-export interface RunningStateChange {
-  profileId: string;
-  running: boolean;
-}
+export type RunningStateChange =
+  | { kind: "launched"; profileId: ProfileId }
+  | { kind: "closing"; profileId: ProfileId }
+  | { kind: "closed"; profileId: ProfileId; reason: "user-close" | "external-exit" };
 
-/** `chromium:status` payload. `status` is "started" | "stopped" | "failed". */
-export interface ChromiumStatus {
-  profileId: string;
-  status: string;
-  error?: string;
-}
+/**
+ * Chromium runtime status — discriminated union by `kind`, matching the
+ * legacy renderer contract. The Rust `chromium:status` event currently
+ * emits a flat object; until P4.8 the UI treats unknown payloads as
+ * `kind: "ready"` (modal hidden). Keep this as a union so the renderer's
+ * exhaustive `switch (status.kind)` compiles.
+ */
+export type ChromiumStatus =
+  | { kind: "ready" }
+  | { kind: "dev-system" }
+  | { kind: "missing" }
+  | { kind: "fetching-manifest" }
+  | { kind: "downloading"; version: string; bytesReceived: number; bytesTotal: number }
+  | { kind: "verifying" }
+  | { kind: "extracting"; version: string }
+  | { kind: "error"; message: string };
+
+/** Legacy alias kept for any code referencing `ChromiumStatusV1`. */
+export type ChromiumStatusEvent = ChromiumStatus;
 
 // ---------------------------------------------------------------------------
 // System info (crates/tauri-app/src/commands/system.rs)
@@ -246,3 +267,63 @@ export interface SystemInfo {
   appVersion: string;
   platform: string;
 }
+
+// ---------------------------------------------------------------------------
+// Renderer-only types (migrated from the legacy renderer/src/types.ts).
+// These describe catalog shapes and push events that the renderer expects
+// but that the Tauri backend does not yet faithfully emit. They are kept
+// here so the migrated components compile; runtime values may be stale or
+// stubbed until P4.8 / P5.
+// ---------------------------------------------------------------------------
+
+/** `extensions:installed` push payload ("Add to MultiZen" companion event). */
+export type ExtensionInstalledEvent =
+  | { ok: true; profileId: string; extension: ExtensionConfig }
+  | { ok: false; profileId: string; error: string };
+
+export interface DeviceCatalogEntry {
+  family: DeviceFamily;
+  label: string;
+  screens: ReadonlyArray<{ width: number; height: number; label: string }>;
+}
+
+export interface LocaleCatalogEntry {
+  id: string;
+  label: string;
+  locale: string;
+  country: string;
+  timezones: ReadonlyArray<string>;
+}
+
+export interface FingerprintReconcilePatch {
+  device?: DeviceFamily;
+  localeId?: string;
+  screen?: { width: number; height: number };
+  timezone?: string;
+  hardwareConcurrency?: number;
+  deviceMemory?: number;
+}
+
+export interface ProxyGeoResult {
+  country: string;
+  countryName: string;
+  timezone: string;
+  city: string;
+  ip: string;
+}
+
+/**
+ * Update-checker status (renderer contract). The Tauri build has no
+ * updater wired yet (scope-excluded); the `update` IPC namespace is a
+ * stub, so any `UpdateStatus` the UI receives will be the stub's
+ * `{ kind: "idle" }` default.
+ */
+export type UpdateStatus =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "available"; version: string; releaseNotes?: string }
+  | { kind: "downloading"; version: string; received: number; total: number; percent: number }
+  | { kind: "ready"; version: string }
+  | { kind: "no-update" }
+  | { kind: "up-to-date" }
+  | { kind: "error"; message: string };

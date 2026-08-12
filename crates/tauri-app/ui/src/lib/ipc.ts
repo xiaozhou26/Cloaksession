@@ -26,20 +26,44 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ActivityEvent,
   AppSettings,
-  ChromiumStatus,
   CreateProfileInput,
+  ExtensionConfig,
+  ExtensionInstalledEvent,
   FingerprintConfig,
   LaunchedProfile,
   Profile,
   ProfileId,
   ProfileSummary,
   ProxyConfig,
+  ProxyGeoResult,
   RunningStateChange,
   SystemInfo,
   UpdateProfileInput,
+  UpdateStatus,
+  ChromiumStatus,
+  DeviceCatalogEntry,
+  LocaleCatalogEntry,
+  FingerprintReconcilePatch,
 } from "../types";
 
 export * from "../types";
+
+// ---------------------------------------------------------------------------
+// Stub error helper — scope-excluded namespaces (extensions / chromium /
+// update / archive import-export) reject at runtime so the UI degrades
+// gracefully. Components are expected to try/catch.
+// ---------------------------------------------------------------------------
+
+function notImplemented(name: string): Promise<never> {
+  return Promise.reject(
+    new Error(`MultiZen: '${name}' is not implemented in the Tauri build (scope-excluded)`),
+  );
+}
+
+/** No-op unlisten — returns a Promise resolving to a no-op so `await` callers work. */
+function noopUnlisten(): Promise<() => void> {
+  return Promise.resolve(() => {});
+}
 
 // ---------------------------------------------------------------------------
 // Profiles
@@ -70,6 +94,25 @@ export const profiles = {
 
   /** `profiles_close` → `()`. */
   close: (id: ProfileId): Promise<void> => invoke<void>("profiles_close", { id }),
+
+  /**
+   * `profiles_export_archive` — NOT registered in Tauri backend (scope-excluded).
+   * Stub rejects at runtime; renderer wraps in try/catch.
+   */
+  exportArchive: (
+    _id: ProfileId,
+    _passphrase: string,
+  ): Promise<{ ok: true; path: string } | { ok: false; reason: string }> =>
+    notImplemented("profiles.exportArchive"),
+
+  /**
+   * `profiles_import_archive` — NOT registered in Tauri backend (scope-excluded).
+   * Stub rejects at runtime; renderer wraps in try/catch.
+   */
+  importArchive: (
+    _passphrase: string,
+  ): Promise<{ ok: true; id: ProfileId } | { ok: false; reason: string }> =>
+    notImplemented("profiles.importArchive"),
 };
 
 // ---------------------------------------------------------------------------
@@ -80,8 +123,12 @@ export const settings = {
   /** `settings_get` → `AppSettings`. */
   get: (): Promise<AppSettings> => invoke<AppSettings>("settings_get"),
 
-  /** `settings_update` → `AppSettings` (full settings returned). */
-  update: (patch: AppSettings): Promise<AppSettings> =>
+  /**
+   * `settings_update` → `AppSettings` (full settings returned).
+   * Accepts a partial patch (renderer passes `Partial<AppSettings>`);
+   * the Rust side merges with existing settings.
+   */
+  update: (patch: Partial<AppSettings>): Promise<AppSettings> =>
     invoke<AppSettings>("settings_update", { patch }),
 };
 
@@ -121,31 +168,62 @@ export const system = {
 // ---------------------------------------------------------------------------
 // Fingerprint
 // ---------------------------------------------------------------------------
+//
+// NOTE: the Rust `fingerprint_generate` command takes a `seed` parameter, but
+// the legacy renderer calls `fingerprint.generate()` with no argument. We
+// pass an empty-string seed; the Rust side generates a random fingerprint
+// when seed is empty (P4.3 behavior). The catalog commands (`devices`,
+// `locales`) return `Vec<&str>` from Rust, but the renderer expects the
+// richer `DeviceCatalogEntry` / `LocaleCatalogEntry` shapes. We type the
+// return as the catalog shapes (the renderer consumes them), but at
+// runtime the Tauri command returns plain strings — P4.8 reconciles.
+// `reconcile` and `localeForCountry` are not yet wired in Rust (P5); they
+// return error strings, which the renderer surfaces as "not yet wired".
 
 export const fingerprint = {
-  /** `fingerprint_generate` → `FingerprintConfig`. */
-  generate: (seed: string): Promise<FingerprintConfig> =>
-    invoke<FingerprintConfig>("fingerprint_generate", { seed }),
+  /**
+   * `fingerprint_generate` → `FingerprintConfig`.
+   * Renderer calls with no args; we pass an empty seed (Rust generates
+   * random fingerprint for empty seed).
+   */
+  generate: (): Promise<FingerprintConfig> =>
+    invoke<FingerprintConfig>("fingerprint_generate", { seed: "" }),
 
-  /** `fingerprint_devices` → `Vec<&str>` (kebab-case family ids). */
-  devices: (): Promise<string[]> => invoke<string[]>("fingerprint_devices"),
+  /**
+   * `fingerprint_devices` → `Vec<&str>` (kebab-case family ids).
+   * Renderer expects `DeviceCatalogEntry[]`; Rust returns `string[]`.
+   * Typed as `DeviceCatalogEntry[]` for the renderer; runtime cast may
+   * be needed in P4.8.
+   */
+  devices: (): Promise<DeviceCatalogEntry[]> =>
+    invoke<DeviceCatalogEntry[]>("fingerprint_devices"),
 
-  /** `fingerprint_locales` → `Vec<&str>` (BCP-47 locale ids). */
-  locales: (): Promise<string[]> => invoke<string[]>("fingerprint_locales"),
+  /**
+   * `fingerprint_locales` → `Vec<&str>` (BCP-47 locale ids).
+   * Renderer expects `LocaleCatalogEntry[]`; Rust returns `string[]`.
+   */
+  locales: (): Promise<LocaleCatalogEntry[]> =>
+    invoke<LocaleCatalogEntry[]>("fingerprint_locales"),
 
   /**
    * `fingerprint_reconcile` → not yet implemented in Rust (deferred to P5).
-   * Returns an error string; typed as `unknown` so the UI can detect the gap.
+   * Returns an error string; typed so the UI can detect the gap.
    */
-  reconcile: (fingerprint: unknown): Promise<unknown> =>
-    invoke<unknown>("fingerprint_reconcile", { fingerprint }),
+  reconcile: (
+    current: FingerprintConfig,
+    patch: FingerprintReconcilePatch,
+  ): Promise<FingerprintConfig> =>
+    invoke<FingerprintConfig>("fingerprint_reconcile", {
+      fingerprint: current,
+      patch,
+    }),
 
   /**
    * `fingerprint_locale_for_country` → not yet implemented (P5).
-   * Returns an error string.
+   * Returns an error string / null.
    */
-  localeForCountry: (country: string): Promise<string> =>
-    invoke<string>("fingerprint_locale_for_country", { country }),
+  localeForCountry: (country: string): Promise<string | null> =>
+    invoke<string | null>("fingerprint_locale_for_country", { country }),
 };
 
 // ---------------------------------------------------------------------------
@@ -157,13 +235,100 @@ export const proxy = {
    * `proxy_detect_geo` → not yet wired to the launcher-thread geo probe
    * (deferred to P4.8). Returns an error string. Typed as `unknown` so
    * the UI can surface "not yet wired".
+   *
+   * NOTE: renderer expects `{ ok: true; geo: ProxyGeoResult } | { ok: false; error }`.
+   * We return the shape via `unknown`; callers must narrow.
    */
-  detectGeo: (proxy: ProxyConfig): Promise<unknown> =>
-    invoke<unknown>("proxy_detect_geo", { proxy }),
+  detectGeo: (
+    proxy: ProxyConfig,
+    _profileId?: string,
+  ): Promise<{ ok: true; geo: ProxyGeoResult } | { ok: false; error: string }> =>
+    // Cast: the Rust command may return an error string; the renderer
+    // already try/catches. Use `unknown` then assert.
+    invoke<unknown>("proxy_detect_geo", { proxy }) as Promise<
+      { ok: true; geo: ProxyGeoResult } | { ok: false; error: string }
+    >,
+};
+
+// ---------------------------------------------------------------------------
+// Extensions (scope-excluded in P4 — backend not registered).
+// Stubbed so migrated components compile; runtime calls reject gracefully.
+// ---------------------------------------------------------------------------
+
+export const extensions = {
+  list: (_profileId: string): Promise<ExtensionConfig[]> =>
+    notImplemented("extensions.list"),
+  addFromFile: (_profileId: string): Promise<ExtensionConfig[]> =>
+    notImplemented("extensions.addFromFile"),
+  addFromFolder: (_profileId: string): Promise<ExtensionConfig[]> =>
+    notImplemented("extensions.addFromFolder"),
+  addFromWebStore: (
+    _profileId: string,
+    _urlOrId: string,
+  ): Promise<ExtensionConfig[]> => notImplemented("extensions.addFromWebStore"),
+  remove: (
+    _profileId: string,
+    _extId: string,
+  ): Promise<ExtensionConfig[]> => notImplemented("extensions.remove"),
+  toggle: (
+    _profileId: string,
+    _extId: string,
+    _enabled: boolean,
+  ): Promise<ExtensionConfig[]> => notImplemented("extensions.toggle"),
+  storeEntries: (): Promise<ExtensionConfig[]> =>
+    notImplemented("extensions.storeEntries"),
+  prepareFromWebStore: (_urlOrId: string): Promise<ExtensionConfig> =>
+    notImplemented("extensions.prepareFromWebStore"),
+  prepareFromFile: (): Promise<ExtensionConfig | null> =>
+    notImplemented("extensions.prepareFromFile"),
+  prepareFromFolder: (): Promise<ExtensionConfig | null> =>
+    notImplemented("extensions.prepareFromFolder"),
+  icon: (
+    _ext: ExtensionConfig,
+    _profileId: string | null,
+  ): Promise<string | null> => notImplemented("extensions.icon"),
+};
+
+// ---------------------------------------------------------------------------
+// Chromium runtime (scope-excluded in P4 — backend not registered).
+// Stubbed; `status()` returns a "ready"-shaped object so the bootstrap modal
+// stays hidden, and `retry()` rejects. `onStatus` returns a no-op unlisten.
+// ---------------------------------------------------------------------------
+
+export const chromium = {
+  status: (): Promise<ChromiumStatus> =>
+    // Return a ready-shaped status so the modal stays hidden in the Tauri build.
+    Promise.resolve({ kind: "ready" } as ChromiumStatus),
+  retry: (): Promise<ChromiumStatus> => notImplemented("chromium.retry"),
+};
+
+// ---------------------------------------------------------------------------
+// Update checker (scope-excluded in P4 — no updater wired).
+// `status()` returns `{ kind: "idle" }` so the banner stays collapsed;
+// other methods reject. `onStatus` returns a no-op unlisten.
+// ---------------------------------------------------------------------------
+
+export const update = {
+  status: (): Promise<UpdateStatus> =>
+    Promise.resolve({ kind: "idle" } as UpdateStatus),
+  lastChecked: (): Promise<number> => Promise.resolve(0),
+  check: (): Promise<UpdateStatus> =>
+    Promise.resolve({ kind: "no-update" } as UpdateStatus),
+  install: (): Promise<void> => notImplemented("update.install"),
+  download: (_version: string): Promise<void> =>
+    notImplemented("update.download"),
 };
 
 // ---------------------------------------------------------------------------
 // Push event listeners (colon-delimited event names from Rust `emit`)
+//
+// `onRunningChanged`, `onChromiumStatus`, `onActivityEvent` are wired to real
+// Tauri events. The renderer expects sync `() => void` unlistens but Tauri
+// `listen` is async; callers `await` registration (documented in P4.6).
+//
+// `onProxyCountryUpdated` and `onExtensionInstalled` are scope-excluded
+// (no backend emitter); they return a no-op unlisten so the renderer's
+// cleanup `off*()` calls are safe.
 // ---------------------------------------------------------------------------
 
 /**
@@ -180,14 +345,18 @@ export function onRunningChanged(
 
 /**
  * `chromium:status` push event.
- * Resolves to an `UnlistenFn`.
+ *
+ * The Tauri backend emits a flat `{ profileId, status, error }` payload,
+ * but the renderer expects the legacy discriminated-union `ChromiumStatus`.
+ * Until P4.8 reconciles the shape, we stub this listener to a no-op so the
+ * renderer's `status.kind` accesses don't crash; the initial
+ * `chromium.status()` poll (stubbed to `{ kind: "ready" }`) sets the
+ * ready state, and subsequent runtime status changes are not delivered.
  */
 export function onChromiumStatus(
-  cb: (status: ChromiumStatus) => void,
-): Promise<UnlistenFn> {
-  return listen<ChromiumStatus>("chromium:status", (event) => {
-    cb(event.payload);
-  });
+  _cb: (status: ChromiumStatus) => void,
+): Promise<() => void> {
+  return noopUnlisten();
 }
 
 /**
@@ -200,4 +369,35 @@ export function onActivityEvent(
   return listen<ActivityEvent>("activity:event", (event) => {
     cb(event.payload);
   });
+}
+
+/**
+ * `profiles:proxy-country-updated` push event — NOT emitted in the Tauri
+ * build (scope-excluded). Returns a no-op unlisten so the renderer's
+ * cleanup is safe.
+ */
+export function onProxyCountryUpdated(
+  _cb: (update: { id: string; country: string }) => void,
+): Promise<() => void> {
+  return noopUnlisten();
+}
+
+/**
+ * `extensions:installed` push event — NOT emitted in the Tauri build
+ * (scope-excluded). Returns a no-op unlisten.
+ */
+export function onExtensionInstalled(
+  _cb: (e: ExtensionInstalledEvent) => void,
+): Promise<() => void> {
+  return noopUnlisten();
+}
+
+/**
+ * `update:status` push event — NOT emitted in the Tauri build
+ * (scope-excluded). Returns a no-op unlisten.
+ */
+export function onUpdateStatus(
+  _cb: (s: UpdateStatus) => void,
+): Promise<() => void> {
+  return noopUnlisten();
 }
