@@ -288,7 +288,42 @@ pub async fn fingerprint_reconcile(
 #[tauri::command]
 pub async fn fingerprint_locale_for_country(
     _state: State<'_, AppState>,
-    _country: String,
-) -> Result<String, String> {
-    Err("fingerprint_locale_for_country not yet implemented (deferred to P5)".into())
+    country: String,
+) -> Result<Option<String>, String> {
+    // Normalise to uppercase 2-letter code (the geo probe returns lowercase).
+    let code = country.trim().to_uppercase();
+
+    // 1. Exact match: scan the catalog for a locale whose country == code.
+    for &locale in COMMON_LOCALES {
+        let (_, country, _) = locale_meta(locale);
+        if country == code {
+            return Ok(Some(locale.to_string()));
+        }
+    }
+
+    // 2. Fallback: culturally adjacent locale for common proxy-exit countries
+    //    that lack an explicit preset in the 20-locale catalog. The frontend
+    //    treats `null` as "no preset matches — pick manually", so we only
+    //    return a fallback when the adjacency is strong (same language family
+    //    + plausible timezone overlap). Unknown countries → null.
+    let fallback = match code.as_str() {
+        // Southeast Asia — English-speaking, fall back to en-GB (closest
+        // English preset; timezone will be overridden by the probe result).
+        "SG" | "MY" | "PH" | "HK" => Some("en-GB"),
+        // DACH region — German-speaking.
+        "AT" | "CH" | "LI" => Some("de-DE"),
+        // Nordics — closest European preset by locale family.
+        "SE" | "NO" | "DK" | "FI" | "IS" => Some("en-GB"),
+        // Latin America — Portuguese/Spanish.
+        "MX" | "AR" | "CL" | "CO" | "PE" | "UY" | "EC" => Some("es-ES"),
+        // Middle East — Arabic.
+        "AE" | "QA" | "KW" | "BH" | "OM" | "JO" | "LB" | "EG" | "IQ" => Some("ar-SA"),
+        // Eastern Europe — Russian-adjacent.
+        "UA" | "BY" | "KZ" | "UZ" | "GE" | "AM" | "AZ" => Some("ru-RU"),
+        // North Africa — Arabic.
+        "MA" | "DZ" | "TN" | "LY" => Some("ar-SA"),
+        _ => None,
+    };
+
+    Ok(fallback.map(|s| s.to_string()))
 }

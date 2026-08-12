@@ -177,8 +177,8 @@ export const system = {
 // richer `DeviceCatalogEntry` / `LocaleCatalogEntry` shapes. We type the
 // return as the catalog shapes (the renderer consumes them), but at
 // runtime the Tauri command returns plain strings — P4.8 reconciles.
-// `reconcile` and `localeForCountry` are not yet wired in Rust (P5); they
-// return error strings, which the renderer surfaces as "not yet wired".
+// `reconcile` is still a stub in Rust (returns Err; P5); `localeForCountry`
+// is wired — returns a matching locale id or null (no preset / no fallback).
 
 export const fingerprint = {
   /**
@@ -219,8 +219,12 @@ export const fingerprint = {
     }),
 
   /**
-   * `fingerprint_locale_for_country` → not yet implemented (P5).
-   * Returns an error string / null.
+  /**
+   * `fingerprint_locale_for_country` → `string | null`. Given a 2-letter
+   * country code (from the proxy geo probe, lowercase or uppercase),
+   * returns the best-matching locale id from the catalog, or `null` when
+   * no preset matches and no culturally adjacent fallback exists (the
+   * frontend then asks the user to pick manually).
    */
   localeForCountry: (country: string): Promise<string | null> =>
     invoke<string | null>("fingerprint_locale_for_country", { country }),
