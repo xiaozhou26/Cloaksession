@@ -4,4 +4,7 @@ members = [
     "crates/multizen-core",
     "crates/profile-manager",
     "crates/settings-store",
+    "crates/behavioral",
+    "crates/browser-launcher",
+    "crates/cdp-driver",
 ]

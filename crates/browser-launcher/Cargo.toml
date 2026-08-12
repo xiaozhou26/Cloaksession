@@ -1,0 +1,20 @@
+[package]
+name = "browser-launcher"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+multizen-core = { path = "../multizen-core" }
+profile-manager = { path = "../profile-manager" }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "process", "io-util", "time", "sync", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "socks"] }
+sha2 = "0.10"
+thiserror = "1"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
