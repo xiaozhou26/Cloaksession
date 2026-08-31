@@ -67,6 +67,7 @@ fn base_args_always_present() {
     assert!(args.iter().any(|a| a == "--lang=en-US"));
     assert!(args.iter().any(|a| a == "--accept-lang=en-US,en;q=0.9"));
     assert!(args.iter().any(|a| a == "--window-size=1920,1080"));
+    assert!(args.iter().all(|a| a != "--incognito" && a != "--guest"));
 }
 
 #[test]
@@ -86,6 +87,22 @@ fn cft_engine_adds_user_agent_and_test_type() {
     assert!(args.iter().any(|a| a == "--test-type=gpu"));
     // CFT must NOT pass --fingerprint-*
     assert!(args.iter().all(|a| !a.starts_with("--fingerprint=")));
+}
+
+#[test]
+fn cft_engine_preserves_custom_user_agent() {
+    let mut p = base_profile();
+    p.fingerprint.user_agent = "Custom/99.1 test-agent".into();
+    let args = build_spawn_args(&p, BrowserEngine::Cft, 9222, "/tmp/p1", None, None, None);
+    assert!(args.iter().any(|a| a == "--user-agent=Custom/99.1 test-agent"));
+}
+
+#[test]
+fn cloak_engine_passes_custom_user_agent() {
+    let mut p = base_profile();
+    p.fingerprint.user_agent = "Custom/99.1 test-agent".into();
+    let args = build_spawn_args(&p, BrowserEngine::Cloakbrowser, 9222, "/tmp/p1", None, None, None);
+    assert!(args.iter().any(|a| a == "--fingerprint-user-agent=Custom/99.1 test-agent"));
 }
 
 #[test]

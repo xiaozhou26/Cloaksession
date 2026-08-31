@@ -36,6 +36,7 @@ fn create_and_get_profile() {
 fn create_full_fingerprint_json_round_trips_without_loss() {
     let (_dir, mgr) = make();
     let mut expected = profile_manager::fingerprint::default_fingerprint("ui-seed");
+    expected.user_agent = "Custom/99.1 test-agent".into();
     expected.locale = "ja-JP".into();
     expected.languages = vec!["ja-JP".into(), "ja".into()];
     expected.accept_language = "ja-JP,ja;q=0.8".into();
@@ -111,6 +112,20 @@ fn update_changes_name_and_clears_icon() {
     }).unwrap();
     assert_eq!(updated.name, "renamed");
     assert_eq!(updated.icon, None);
+}
+
+#[test]
+fn update_persists_custom_user_agent() {
+    let (_dir, mgr) = make();
+    let p = mgr.create(CreateProfileInput { name: "ua".into(), ..Default::default() }).unwrap();
+    let mut fingerprint = p.fingerprint.clone();
+    fingerprint.user_agent = "Custom/99.1 test-agent".into();
+    mgr.update(&p.id, UpdateProfileInput {
+        fingerprint: Some(fingerprint),
+        ..Default::default()
+    }).unwrap();
+    let fetched = mgr.get(&p.id).unwrap().unwrap();
+    assert_eq!(fetched.fingerprint.user_agent, "Custom/99.1 test-agent");
 }
 
 #[test]

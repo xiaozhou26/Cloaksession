@@ -67,6 +67,7 @@ pub fn build_cloak_fingerprint_args(profile_id: &str, fp: &FingerprintConfig) ->
         format!("--fingerprint-platform={}", cloak_platform(&fp.device)),
         format!("--fingerprint-locale={}", fp.locale),
         format!("--fingerprint-timezone={}", fp.timezone),
+        format!("--fingerprint-user-agent={}", fp.user_agent),
         format!("--fingerprint-screen-width={}", fp.screen.width),
         format!("--fingerprint-screen-height={}", fp.screen.height),
         format!("--fingerprint-hardware-concurrency={}", fp.hardware_concurrency),

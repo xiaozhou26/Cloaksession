@@ -15,7 +15,7 @@ import type {
  *
  * Three coherent dropdowns (Device → Locale → Screen) that filter each other.
  * One Regen button that picks a fresh device + locale + screen combo.
- * Read-only UA chip showing the derived User-Agent.
+ * User-Agent is editable alongside the other persisted fingerprint values.
  *
  * If the parent passes a `proxy`, this component additionally shows:
  *   - "Detect from proxy" button next to Locale → probes ipapi.co through
@@ -66,6 +66,13 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
     const request = ++reconcileRequest.current;
     const next = await fingerprintApi.reconcile(latestFingerprint.current, patch);
     if (request === reconcileRequest.current) onChange(next);
+  }
+
+  function applyDirectChange(next: FingerprintConfig): void {
+    // A pending reconcile was based on the previous fingerprint and must not
+    // overwrite a newer text edit when it completes.
+    reconcileRequest.current += 1;
+    onChange(next);
   }
 
   async function detectFromProxy(): Promise<void> {
@@ -263,7 +270,7 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
         <input
           type="text"
           value={fingerprint.userAgent}
-          onChange={(e) => onChange({ ...fingerprint, userAgent: e.target.value })}
+          onChange={(e) => applyDirectChange({ ...fingerprint, userAgent: e.target.value })}
           className="w-full px-2.5 h-9 rounded-lg bg-white/[0.03] text-[12px] text-slate-200 outline-none mono"
           style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}
         />

@@ -4,6 +4,11 @@
 
 use tauri_app::ProfileRegistry;
 
+#[test]
+fn about_uses_released_app_version() {
+    assert_eq!(env!("CARGO_PKG_VERSION"), "0.1.1");
+}
+
 #[tokio::test]
 async fn registry_get_or_connect_missing_endpoint_errors_cleanly() {
     // No real browser at this endpoint; BrowserSession::connect should fail

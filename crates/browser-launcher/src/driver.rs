@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 
-use multizen_core::{BrowserEngine, LaunchedProfile, MultizenError, Result};
+use multizen_core::{BrowserEngine, LaunchedProfile, MultizenError, Result, UpdateProfileInput};
 use profile_manager::ProfileManager;
 use tokio::process::{Child, Command};
 
@@ -11,7 +11,7 @@ use crate::proxy_geo::probe_proxy_geo;
 use crate::registry::RunningRegistry;
 use crate::session_restore::{clean_stale_singleton_locks, ensure_session_restore};
 use crate::socks5_bridge::Socks5Bridge;
-use crate::version::detect_chromium_version;
+use crate::version::{detect_chromium_version, synchronize_managed_fingerprint_version};
 
 const CDP_PORT_BASE: u16 = 9222;
 
@@ -71,7 +71,7 @@ impl BrowserLauncher {
         }
 
         // 2. Load profile + mark opened.
-        let profile = self
+        let mut profile = self
             .pm
             .get(profile_id)
             .map_err(|e| MultizenError::Launch(format!("profile get: {e}")))?
@@ -93,8 +93,22 @@ impl BrowserLauncher {
         std::fs::create_dir_all(&browser_data_dir)
             .map_err(|e| MultizenError::Launch(format!("data_dir: {e}")))?;
 
-        // 5. Version probe (best-effort, not used for UA rewrite in this plan).
-        let _version = detect_chromium_version(binary_path).await;
+        // 5. Read the executable version without starting a second browser.
+        // Some Windows Chromium builds turn `--version` into a normal launch.
+        if let Some(version) = detect_chromium_version(binary_path) {
+            tracing::debug!(binary = %binary_path.display(), %version, "browser runtime version detected");
+            if synchronize_managed_fingerprint_version(&mut profile.fingerprint, &version) {
+                self.pm
+                    .update(
+                        profile_id,
+                        UpdateProfileInput {
+                            fingerprint: Some(profile.fingerprint.clone()),
+                            ..Default::default()
+                        },
+                    )
+                    .map_err(|e| MultizenError::Launch(format!("sync fingerprint version: {e}")))?;
+            }
+        }
 
         // 6. Proxy: start socks5 bridge + geo probe (best-effort).
         let mut bridge_handle: Option<(Socks5Bridge, u16)> = None;
