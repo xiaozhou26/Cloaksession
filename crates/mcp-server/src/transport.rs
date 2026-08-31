@@ -5,12 +5,17 @@
 //! provides the testable surface: `parse_bearer`, `host_allowed`,
 //! `build_router`, `allowed_hosts`, plus placeholder handlers.
 
+use std::sync::Arc;
+
+use axum::body::{to_bytes, Body};
 use axum::extract::Request;
 use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use serde_json::json;
+
+use crate::server::{handle_json_rpc, McpDispatcher};
 
 /// Strip the `Bearer ` prefix from an Authorization header value and return the token.
 pub fn parse_bearer(auth: &HeaderValue) -> Option<String> {
@@ -35,14 +40,20 @@ pub fn allowed_hosts(port: u16) -> Vec<String> {
 /// `auth_token`, when set, gates `/mcp` and `/sse` via bearer comparison
 /// using `token::token_matches` (constant-time). `port` is the port the
 /// server is served on, used to build the DNS-rebinding Host allow-list.
-pub fn build_router(auth_token: Option<String>, port: u16) -> Router {
+pub fn build_router(
+    auth_token: Option<String>,
+    port: u16,
+    dispatcher: Arc<dyn McpDispatcher>,
+) -> Router {
     let mcp_token = auth_token.clone();
     let sse_token = auth_token.clone();
     Router::new()
         .route("/healthz", get(healthz))
         .route(
             "/mcp",
-            post(move |req: Request| handle_mcp(req, mcp_token.clone(), port)),
+            post(move |req: Request| {
+                handle_mcp(req, mcp_token.clone(), port, dispatcher.clone())
+            }),
         )
         .route(
             "/sse",
@@ -54,7 +65,12 @@ async fn healthz() -> Json<serde_json::Value> {
     Json(json!({"ok": true, "name": "multizen-mcp"}))
 }
 
-async fn handle_mcp(req: Request, auth_token: Option<String>, port: u16) -> Response {
+async fn handle_mcp(
+    mut req: Request,
+    auth_token: Option<String>,
+    port: u16,
+    dispatcher: Arc<dyn McpDispatcher>,
+) -> Response {
     // Auth check (constant-time bearer compare).
     if let Some(tok) = &auth_token {
         let provided = req.headers().get("authorization").and_then(parse_bearer);
@@ -84,16 +100,30 @@ async fn handle_mcp(req: Request, auth_token: Option<String>, port: u16) -> Resp
             .into_response();
     }
 
-    // rmcp ServiceServer dispatch is wired in Plan 4. Placeholder response:
-    Json(json!({
-        "jsonrpc": "2.0",
-        "id": null,
-        "error": {
-            "code": -32601,
-            "message": "mcp dispatch not wired in Plan 3"
+    let body = std::mem::replace(req.body_mut(), Body::empty());
+    let bytes = match to_bytes(body, 1024 * 1024).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                format!("invalid request body: {error}"),
+            )
+                .into_response();
         }
-    }))
-    .into_response()
+    };
+    let request_json: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(error) => {
+            return Json(json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": {"code": -32700, "message": format!("parse error: {error}")}
+            }))
+            .into_response();
+        }
+    };
+
+    Json(handle_json_rpc(dispatcher.as_ref(), request_json).await).into_response()
 }
 
 async fn handle_sse(req: Request, auth_token: Option<String>, port: u16) -> Response {

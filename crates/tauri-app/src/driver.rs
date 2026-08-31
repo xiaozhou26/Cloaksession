@@ -602,33 +602,12 @@ impl BrowserDriver for TauriBrowserDriver {
         profile_id: &str,
         method: &str,
         params: Option<serde_json::Value>,
-        _session_id: Option<&str>,
+        session_id: Option<&str>,
         _safe: bool,
     ) -> Result<serde_json::Value> {
-        // BrowserSession exposes only Runtime.evaluate (via `evaluate`); it
-        // does not expose a generic raw-CDP dispatch. Support the one method
-        // Plan 3's cdp_send tool uses most — Runtime.evaluate — by extracting
-        // the `expression` field from params. Reject everything else with a
-        // clear Mcp error so callers know to use a specific tool method
-        // (navigate/click/type_text/extract/screenshot) instead.
-        if method == "Runtime.evaluate" {
-            let session = self.require_session(profile_id).await?;
-            let expression = params
-                .as_ref()
-                .and_then(|p| p.get("expression"))
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| {
-                    MultizenError::Mcp(
-                        "cdp_send Runtime.evaluate requires `expression` string in params".into(),
-                    )
-                })?;
-            return session.evaluate(expression).await;
-        }
-        Err(MultizenError::Mcp(format!(
-            "cdp_send not supported via TauriBrowserDriver for method `{method}`; \
-             use a specific tool method (navigate/click/type_text/extract/screenshot) instead. \
-             Only `Runtime.evaluate` is dispatched (delegated to BrowserSession::evaluate)."
-        )))
+        let session = self.require_session(profile_id).await?;
+        session.cdp_send(method, params, session_id).await
+
     }
 }
 
@@ -673,6 +652,21 @@ impl TauriBrowserDriver {
         resp_rx
             .await
             .map_err(|_| MultizenError::Mcp("launcher thread dropped response".into()))?
+    }
+
+    pub async fn activate_tab(&self, profile_id: &str, tab_id: &str) -> Result<()> {
+        let session = self.require_session(profile_id).await?;
+        session.activate_page(tab_id).await
+    }
+
+    pub async fn new_tab(&self, profile_id: &str, url: &str) -> Result<String> {
+        let session = self.require_session(profile_id).await?;
+        session.new_page(url).await
+    }
+
+    pub async fn close_tab(&self, profile_id: &str, tab_id: &str) -> Result<()> {
+        let session = self.require_session(profile_id).await?;
+        session.close_page(tab_id).await
     }
 
     pub async fn create_profile(&self, input: CreateProfileInput) -> Result<Profile> {

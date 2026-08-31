@@ -112,8 +112,11 @@ pub fn build_cloak_fingerprint_args(profile_id: &str, fp: &FingerprintConfig) ->
     }
     if let Some(q) = fp.storage_quota {
         if q > 0 {
-            // CloakBrowser expects storage quota in MB, not bytes.
-            args.push(format!("--fingerprint-storage-quota={}", q / 1_000_000));
+            // BrowserScan's Chrome heuristic compares quota with twice the JS heap limit.
+            // Keep the configured quota when it is already high enough, otherwise use a
+            // 16 GiB floor so normal profiles are not classified as private browsing.
+            let quota_mb = (q / 1_000_000).max(16_384);
+            args.push(format!("--fingerprint-storage-quota={quota_mb}"));
         }
     }
     args
@@ -139,6 +142,7 @@ pub fn build_spawn_args(
         format!("--lang={}", fp.locale),
         format!("--accept-lang={}", fp.accept_language),
         format!("--window-size={},{}", fp.screen.width, fp.screen.height),
+        format!("--force-device-scale-factor={}", fp.dpr),
     ];
 
     // Platform-specific

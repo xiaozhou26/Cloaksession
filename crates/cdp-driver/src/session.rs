@@ -1,8 +1,37 @@
 use chromiumoxide::Page;
+use chromiumoxide::cdp::browser_protocol::target::TargetId;
+use chromiumoxide::handler::HandlerConfig;
+use chromiumoxide::{Command, Method};
 use multizen_core::{BrowserEngine, MultizenError, Result};
+use serde::ser::Serializer;
 use tokio::sync::Mutex;
 
 use crate::safe_cdp::{self, SafeEnableRefcount};
+
+#[derive(Debug)]
+struct RawCdpCommand {
+    method: String,
+    params: serde_json::Value,
+}
+
+impl serde::Serialize for RawCdpCommand {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.params.serialize(serializer)
+    }
+}
+
+impl Method for RawCdpCommand {
+    fn identifier(&self) -> chromiumoxide::types::MethodId {
+        self.method.clone().into()
+    }
+}
+
+impl Command for RawCdpCommand {
+    type Response = serde_json::Value;
+}
 
 /// Retry a GET request that returns JSON, sleeping `delay_ms` between
 /// attempts, up to `max_attempts` times. Used to wait for Chromium's CDP
@@ -34,8 +63,8 @@ pub struct BrowserSession {
     pub safe: SafeEnableRefcount,
     /// Active page used by all tools (navigate/screenshot/evaluate/click/
     /// type_text/extract). `None` until the first navigate or first tool
-    /// call. `Page` is `Clone` (wraps `Arc<PageInner>` in chromiumoxide 0.7)
-    /// so we store an `Option<Page>` and clone on retrieval.
+    /// call. `Page` is `Clone` and stores shared browser state, so we keep
+    /// an `Option<Page>` and clone on retrieval.
     active_page: Mutex<Option<Page>>,
 }
 
@@ -55,7 +84,11 @@ impl BrowserSession {
             .ok_or_else(|| MultizenError::Cdp("no webSocketDebuggerUrl".into()))?
             .to_string();
 
-        let (browser, mut handler) = chromiumoxide::Browser::connect(&ws_url)
+        let handler_config = HandlerConfig {
+            ignore_invalid_messages: true,
+            ..HandlerConfig::default()
+        };
+        let (browser, mut handler) = chromiumoxide::Browser::connect_with_config(&ws_url, handler_config)
             .await
             .map_err(|e| MultizenError::Cdp(format!("connect: {e}")))?;
         // Drive the CDP handler in background. `Handler` implements
@@ -118,7 +151,99 @@ impl BrowserSession {
         *guard = Some(page);
     }
 
-    /// Poll all open page targets whose URL contains `url_filter` for the
+    /// Select an attached page by target id for subsequent page operations.
+    pub async fn activate_page(&self, target_id: &str) -> Result<()> {
+        let activate = RawCdpCommand {
+            method: "Target.activateTarget".into(),
+            params: serde_json::json!({ "targetId": target_id }),
+        };
+        self.browser
+            .execute(activate)
+            .await
+            .map_err(|e| MultizenError::Cdp(format!("activate page {target_id}: {e}")))?;
+        let page = self
+            .browser
+            .get_page(TargetId::new(target_id))
+            .await
+            .map_err(|e| MultizenError::Cdp(format!("get page {target_id}: {e}")))?;
+        self.set_active_page(page).await;
+        Ok(())
+    }
+
+    /// Create and attach a new page, making it the active page for subsequent operations.
+    pub async fn new_page(&self, url: &str) -> Result<String> {
+        let page = self
+            .browser
+            .new_page(url)
+            .await
+            .map_err(|e| MultizenError::Cdp(format!("new page {url}: {e}")))?;
+        let target_id = page.target_id().as_ref().to_string();
+        self.set_active_page(page).await;
+        Ok(target_id)
+    }
+
+    /// Close a page and select another attached page if the active page was closed.
+    pub async fn close_page(&self, target_id: &str) -> Result<()> {
+        let page = self
+            .browser
+            .get_page(TargetId::new(target_id))
+            .await
+            .map_err(|e| MultizenError::Cdp(format!("get page {target_id}: {e}")))?;
+        let was_active = self
+            .active_page
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|active| active.target_id().as_ref() == target_id);
+        page.close()
+            .await
+            .map_err(|e| MultizenError::Cdp(format!("close page {target_id}: {e}")))?;
+        if was_active {
+            let next = self
+                .browser
+                .pages()
+                .await
+                .map_err(|e| MultizenError::Cdp(format!("pages after close: {e}")))?
+                .into_iter()
+                .find(|candidate| candidate.target_id().as_ref() != target_id);
+            let mut guard = self.active_page.lock().await;
+            *guard = next;
+        }
+        Ok(())
+    }
+
+    /// Execute an allow-listed raw CDP command against the active page.
+    pub async fn cdp_send(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+        session_id: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let page = self.active_page().await?;
+        let target_session = page.session_id().as_ref();
+        if session_id.is_some_and(|id| id != target_session) {
+            return Err(MultizenError::Cdp(
+                "explicit CDP session_id does not match the active page".into(),
+            ));
+        }
+        let command = |method: &str, params: Option<serde_json::Value>| RawCdpCommand {
+            method: method.to_string(),
+            params: params.unwrap_or_default(),
+        };
+        let response = match method {
+            "Target.getTargets" | "Target.createTarget" | "Target.activateTarget" | "Target.closeTarget" => self
+                .browser
+                .execute(command(method, params))
+                .await
+                .map_err(|e| MultizenError::Cdp(format!("{method}: {e}")))?,
+            _ => page
+                .execute(command(method, params))
+                .await
+                .map_err(|e| MultizenError::Cdp(format!("{method}: {e}")))?,
+        };
+        Ok(response.result)
+    }
+
     /// `data-mz-add-ext` DOM attribute. If found, the attribute is cleared
     /// and its value is returned. This is the companion channel: the content
     /// script on Chrome Web Store pages writes the extension id to

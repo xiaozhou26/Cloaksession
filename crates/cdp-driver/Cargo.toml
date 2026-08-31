@@ -7,7 +7,7 @@ edition = "2021"
 multizen-core = { path = "../multizen-core" }
 browser-launcher = { path = "../browser-launcher" }
 behavioral = { path = "../behavioral" }
-chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+chromiumoxide = { version = "0.9.1", default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

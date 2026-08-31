@@ -67,6 +67,7 @@ fn base_args_always_present() {
     assert!(args.iter().any(|a| a == "--lang=en-US"));
     assert!(args.iter().any(|a| a == "--accept-lang=en-US,en;q=0.9"));
     assert!(args.iter().any(|a| a == "--window-size=1920,1080"));
+    assert!(args.iter().any(|a| a == "--force-device-scale-factor=1"));
     assert!(args.iter().all(|a| a != "--incognito" && a != "--guest"));
 }
 
@@ -139,6 +140,13 @@ fn device_memory_api_value_clamps() {
     assert_eq!(device_memory_api_value(4), 4);
     assert_eq!(device_memory_api_value(6), 8, "round(log2(6))=3 → 2^3=8");
     assert_eq!(device_memory_api_value(2), 2);
+}
+
+#[test]
+fn cloak_storage_quota_clears_browser_scan_private_mode_heuristic() {
+    let p = base_profile();
+    let args = build_cloak_fingerprint_args(&p.id, &p.fingerprint);
+    assert!(args.iter().any(|a| a == "--fingerprint-storage-quota=16384"));
 }
 
 #[test]
