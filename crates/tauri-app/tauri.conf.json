@@ -4,9 +4,9 @@
   "version": "1.1.1",
   "identifier": "com.cloaksession.browser",
   "build": {
-    "beforeDevCommand": {"script": "npm run dev", "cwd": "ui"},
+    "beforeDevCommand": {"script": "npm --prefix ../resources/chromix ci --omit=dev && npm run dev", "cwd": "ui"},
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": {"script": "npm run build", "cwd": "ui"},
+    "beforeBuildCommand": {"script": "npm --prefix ../resources/chromix ci --omit=dev && npm run build", "cwd": "ui"},
     "frontendDist": "ui/dist"
   },
   "app": {
@@ -21,6 +21,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "resources/chromix/": "chromix/"
+    },
     "icon": [
       "icons/icon.ico",
       "icons/128x128.png",

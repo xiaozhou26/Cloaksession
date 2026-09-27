@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "repo": "https://github.com/xiaozhou26/Chromix",
+  "commit": "39b9ea1bd262c2eb6306f3e23279398a6476c845",
+  "sourceURL": "https://github.com/xiaozhou26/Chromix/tree/39b9ea1bd262c2eb6306f3e23279398a6476c845/sdk/node",
+  "fetchedDate": "2026-09-27",
+  "package": {
+    "name": "@xiaoxiaofeihh/chromix",
+    "version": "0.1.0"
+  },
+  "npmComparison": {
+    "registryVersion": "0.1.0",
+    "publishedAt": "2026-09-07T11:24:09.249Z",
+    "registryURL": "https://registry.npmjs.org/@xiaoxiaofeihh/chromix/0.1.0",
+    "summary": [
+      "The pinned main source retains version 0.1.0 but is not the npm 0.1.0 tarball; it adds /puppeteer, /cookies, yauzl and measured devicePool validation.",
+      "Main persists profile seeds, normalizes nested launch arguments, honors launchOptions.executablePath before binary download, and defaults ordinary contexts to a native viewport.",
+      "Main uses the effective proxy for GeoIP and rejects lookup failures; the npm tarball performs direct GeoIP fetches and continues after lookup failure.",
+      "devicePool is native measured-evidence admission, not custom fingerprint configuration. It rejects args, proxy, humanize and nested launch/context overrides; the host-controlled CDP bridge must not claim measured-mode support."
+    ]
+  },
+  "fileCount": 15,
+  "fileCountNote": "The pinned package.files lists 14 files. Including package.json yields 15 unmodified upstream files, not 16; no sixteenth source file is declared or present.",
+  "hashAlgorithm": "sha256",
+  "files": {
+    "LICENSE": "e0733a38c679c829bc0ff3a8226d2ac074bc3087a8ba9c685cff753a84bb8f5c",
+    "README.md": "3d3e9e67bbd1368b7a535c029f868221292d20ea0f81432c8706b3c269bae138",
+    "_binary.js": "42d096f82ae3dbd6695992b0958e75ea82580174444e790d8e33cc5411bc2447",
+    "_device_pool.js": "f7779489ee0b117d4ee84522ccdbc9b9acbda20dd23560c63a3064a8437cbac9",
+    "_fingerprint.js": "ea1d4a70428aa21169a256f54a4c4abd657a752a1e3eee94fd63a47d1ba335a3",
+    "_fonts.js": "d22314c458383ef54c6d069276b355504c99163ec1e9903594fd08f57ab8b5c0",
+    "_network.js": "71b043b09beb7a8bc08b1a1db7f9bf011cb0d9eeb53b36a96b786de549cd3dae",
+    "_persona.js": "1574ab7cc9689207df04bd65c0d5c0b4d051c11eb83f40cfa12b06e9305722ec",
+    "_profile.js": "50b18840090afa4ea9ea600a04ca24bc5e9a563e26ad86c05592675fd30ff430",
+    "_socks_auth.js": "8368ef498b4d8322b879f5cf7b534eac7480224c52b06b12fc1df3f18f9dafe0",
+    "cli.js": "de13b614561a3ad7523255495aba35f71cc8c595354fdf0caa7aa1f58a406442",
+    "cookies.js": "62822118e78951ae46a0cf3c5e762ec177970ceba6571cdf4ef27a1a3364754f",
+    "index.js": "9678103d102beea5c29b53e6b9aba30930393548d6a5c0c4868eb80fd88e233f",
+    "package.json": "3bd93ffd5f91819ed51072a6310afaeba0393cfcfec9d0cbb803ce0f68fdf6a0",
+    "puppeteer.js": "1c525cedf072fecb3a518a1851f2241f02fb9bbb99dcb335e2d6e95d98d37245"
+  }
+}

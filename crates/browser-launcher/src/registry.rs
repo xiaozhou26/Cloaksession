@@ -21,7 +21,7 @@ impl RunningRegistry {
     /// must use [`with`](Self::with) which holds the lock.
     pub async fn get(&self, profile_id: &str) -> Option<(String, String, u32)> {
         let guard = self.inner.lock().await;
-        guard.get(profile_id).map(|h| h.endpoint_info())
+        guard.get(profile_id).filter(|handle| handle.is_alive()).map(|h| h.endpoint_info())
     }
 
     pub async fn with<F, R>(&self, profile_id: &str, f: F) -> Option<R>
@@ -29,7 +29,7 @@ impl RunningRegistry {
         F: FnOnce(&BrowserHandle) -> R,
     {
         let guard = self.inner.lock().await;
-        guard.get(profile_id).map(f)
+        guard.get(profile_id).filter(|handle| handle.is_alive()).map(f)
     }
 
     pub async fn insert(&self, handle: BrowserHandle) {
@@ -42,7 +42,7 @@ impl RunningRegistry {
     }
 
     pub async fn contains(&self, profile_id: &str) -> bool {
-        self.inner.lock().await.contains_key(profile_id)
+        self.inner.lock().await.get(profile_id).is_some_and(|handle| handle.is_alive())
     }
 
     pub async fn ids(&self) -> Vec<String> {

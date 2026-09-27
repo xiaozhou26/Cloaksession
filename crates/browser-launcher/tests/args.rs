@@ -43,6 +43,7 @@ fn base_profile() -> Profile {
             storage_quota: Some(2_000_000_000),
             seed: Some("abc".into()),
         },
+        chromix_options: Default::default(),
         extensions: None,
         icon: None,
         start_url: Some("https://example.com".into()),
@@ -53,6 +54,25 @@ fn base_profile() -> Profile {
         last_opened_at: None,
         proxy_country: None,
     }
+}
+
+#[test]
+fn chromix_args_do_not_inherit_cloak_fingerprint_or_proxy_policy() {
+    let profile = base_profile();
+    let args = build_spawn_args(
+        &profile,
+        BrowserEngine::Chromix,
+        12345,
+        "/profile/engines/chromix",
+        Some("socks5://127.0.0.1:1080"),
+        Some((40.7, -74.0)),
+        Some("/companion"),
+    );
+    assert_eq!(args, vec![
+        "--user-data-dir=/profile/engines/chromix",
+        "--remote-debugging-address=127.0.0.1",
+        "--remote-debugging-port=12345",
+    ]);
 }
 
 #[test]

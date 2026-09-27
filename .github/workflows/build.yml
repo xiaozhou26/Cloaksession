@@ -1,0 +1,121 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            crates/tauri-app/ui/package-lock.json
+            crates/tauri-app/resources/chromix/package-lock.json
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            libsecret-1-dev \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            libfuse2
+
+      - name: Install UI dependencies
+        working-directory: crates/tauri-app/ui
+        run: npm ci --legacy-peer-deps
+
+      - name: Install Chromix SDK runtime
+        working-directory: crates/tauri-app/resources/chromix
+        run: npm ci --omit=dev
+
+      - name: Test Rust workspace
+        run: cargo test --workspace --locked
+
+      - name: Test Chromix SDK bridge
+        working-directory: crates/tauri-app/resources/chromix
+        run: npm test
+
+      - name: Test frontend fingerprint catalog
+        working-directory: crates/tauri-app/ui
+        run: node --experimental-strip-types src/lib/chromixFingerprint.test.mjs
+
+      - name: Build frontend
+        working-directory: crates/tauri-app/ui
+        run: npm run build
+
+      - name: Install Chrome for browser tests
+        working-directory: crates/tauri-app/ui
+        run: npx playwright install --with-deps chrome
+
+      - name: Test frontend in Chromium
+        working-directory: crates/tauri-app/ui
+        run: npx playwright test --config playwright.config.ts
+
+  tauri-build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            crates/tauri-app/ui/package-lock.json
+            crates/tauri-app/resources/chromix/package-lock.json
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            libsecret-1-dev \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            libfuse2
+
+      - name: Install UI dependencies
+        working-directory: crates/tauri-app/ui
+        run: npm ci --legacy-peer-deps
+
+      - name: Install Chromix SDK runtime
+        working-directory: crates/tauri-app/resources/chromix
+        run: npm ci --omit=dev
+
+      - name: Compile Tauri application
+        working-directory: crates/tauri-app/ui
+        run: npx tauri build --no-bundle --config ../tauri.conf.json

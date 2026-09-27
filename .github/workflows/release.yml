@@ -44,6 +44,14 @@ jobs:
         working-directory: crates/tauri-app/ui
         run: npm install --legacy-peer-deps
 
+      - name: Install Chromix SDK runtime
+        working-directory: crates/tauri-app/resources/chromix
+        run: npm ci --omit=dev
+
+      - name: Test Chromix SDK bridge
+        working-directory: crates/tauri-app/resources/chromix
+        run: npm test
+
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |

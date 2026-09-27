@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import { Check, Loader2, TriangleAlert } from "lucide-react";
 import type { FingerprintConfig, Profile, ProxyConfig, UpdateProfileInput } from "../../types";
 import { FingerprintForm } from "./FingerprintForm";
+import { ChromixProfileOptions } from "./ChromixProfileOptions";
 import { ProxyTester } from "./ProxyTester";
 import { ExtensionsSection } from "./ExtensionsSection";
 import { EmojiField } from "./EmojiField";
@@ -40,6 +41,7 @@ interface FormState {
   proxyUsername: string;
   proxyPassword: string;
   fingerprint: FingerprintConfig;
+  chromixOptions: Record<string, unknown>;
 }
 
 function toForm(p: Profile): FormState {
@@ -56,6 +58,7 @@ function toForm(p: Profile): FormState {
     proxyUsername: p.proxy?.username ?? "",
     proxyPassword: p.proxy?.password ?? "",
     fingerprint: p.fingerprint,
+    chromixOptions: p.chromixOptions ?? {},
   };
 }
 
@@ -84,6 +87,7 @@ function toPatch(f: FormState): UpdateProfileInput {
     startUrl: f.startUrl.trim() || null, // null → app default start page
     proxy,
     fingerprint: f.fingerprint,
+    chromixOptions: f.chromixOptions,
   };
 }
 
@@ -196,7 +200,7 @@ export function ProfileEditSheet({ profile, onSaved }: Props): JSX.Element {
       : undefined;
 
   return (
-    <div className="flex" style={{ height: SHEET_HEIGHT }}>
+    <div className="flex flex-col sm:flex-row" style={{ height: SHEET_HEIGHT }}>
       <SectionRail
         section={section}
         onSelect={setSection}
@@ -205,7 +209,7 @@ export function ProfileEditSheet({ profile, onSaved }: Props): JSX.Element {
       />
 
       {/* Content pane — only this scrolls */}
-      <div className="flex-1 min-w-0 overflow-y-auto px-5 py-4">
+      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto px-5 py-4">
         {section === "general" && (
           <div className="space-y-3">
             <div className="flex gap-2.5 items-end">
@@ -320,6 +324,13 @@ export function ProfileEditSheet({ profile, onSaved }: Props): JSX.Element {
         )}
 
         {section === "extensions" && <ExtensionsSection profileId={profile.id} />}
+
+        {section === "chromix" && (
+          <ChromixProfileOptions
+            options={form.chromixOptions}
+            onChange={(options) => update("chromixOptions", options)}
+          />
+        )}
 
         {section === "fingerprint" && (
           <FingerprintForm

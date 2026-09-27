@@ -159,9 +159,9 @@ export function Modal({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        className={`relative flex flex-col mx-6 ${panelClassName ?? ""}`}
+        className={`relative flex min-w-0 flex-col mx-3 sm:mx-6 ${panelClassName ?? ""}`}
         style={{
-          width: "100%",
+          width: "calc(100% - 24px)",
           maxWidth: width,
           maxHeight: "calc(100vh - 64px)",
           background: "rgba(15,16,22,0.96)",
@@ -202,7 +202,7 @@ export function Modal({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto">{children}</div>
+        <div className="flex-1 min-h-0 overflow-y-auto">{children}</div>
 
         {footer && (
           <div

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 
-use multizen_core::{BrowserEngine, LaunchedProfile, MultizenError, Result, UpdateProfileInput};
+use multizen_core::{BrowserEngine, ChromixSettings, LaunchedProfile, MultizenError, Result, UpdateProfileInput};
 use profile_manager::ProfileManager;
 use tokio::process::{Child, Command};
 
@@ -22,9 +22,14 @@ pub struct BrowserHandle {
     pub started_at: String,
     child: Option<Child>,
     bridge: Option<Socks5Bridge>,
+    chromix: Option<crate::chromix::ChromixProcess>,
 }
 
 impl BrowserHandle {
+    pub(crate) fn is_alive(&self) -> bool {
+        self.chromix.as_ref().map_or(true, |process| process.is_alive())
+    }
+
     pub fn endpoint_info(&self) -> (String, String, u32) {
         (self.profile_id.clone(), self.cdp_endpoint.clone(), self.pid)
     }
@@ -34,6 +39,7 @@ pub struct BrowserLauncher {
     pm: Arc<ProfileManager>,
     registry: RunningRegistry,
     next_port: AtomicU16,
+    chromix_launch: tokio::sync::Mutex<()>,
 }
 
 impl BrowserLauncher {
@@ -42,6 +48,7 @@ impl BrowserLauncher {
             pm,
             registry: RunningRegistry::new(),
             next_port: AtomicU16::new(CDP_PORT_BASE),
+            chromix_launch: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -56,6 +63,11 @@ impl BrowserLauncher {
         engine: BrowserEngine,
         companion_dir: Option<&Path>,
     ) -> Result<LaunchedProfile> {
+        if engine == BrowserEngine::Chromix {
+            return Err(MultizenError::Launch(
+                "Chromix requires launch_with_chromix with its settings and npm runtime directory".into(),
+            ));
+        }
         // 1. Idempotent: if already running, return the existing endpoint info.
         if self.registry.contains(profile_id).await {
             return self
@@ -89,6 +101,7 @@ impl BrowserLauncher {
                 .join("engines")
                 .join("cloakbrowser"),
             BrowserEngine::Cft => PathBuf::from(&profile.data_dir),
+            BrowserEngine::Chromix => unreachable!("Chromix uses launch_with_chromix"),
         };
         std::fs::create_dir_all(&browser_data_dir)
             .map_err(|e| MultizenError::Launch(format!("data_dir: {e}")))?;
@@ -162,6 +175,7 @@ impl BrowserLauncher {
             started_at: started_at.clone(),
             child: Some(child),
             bridge: bridge_handle.map(|(b, _)| b),
+            chromix: None,
         };
         self.registry.insert(handle).await;
 
@@ -174,11 +188,76 @@ impl BrowserLauncher {
         })
     }
 
+    /// Launch through the bundled official SDK; an empty binary path enables SDK resolution.
+    pub async fn launch_with_chromix(
+        &self,
+        profile_id: &str,
+        binary_path: &Path,
+        companion_dir: Option<&Path>,
+        config: &ChromixSettings,
+        runtime_dir: &Path,
+        skip_download: bool,
+    ) -> Result<LaunchedProfile> {
+        let _launch = self.chromix_launch.lock().await;
+        if let Some(existing) = self
+            .registry
+            .with(profile_id, |handle| LaunchedProfile {
+                id: handle.profile_id.clone(),
+                cdp_endpoint: handle.cdp_endpoint.clone(),
+                pid: handle.pid,
+                started_at: handle.started_at.clone(),
+            })
+            .await
+        {
+            return Ok(existing);
+        }
+        self.close(profile_id).await?;
+        let profile = self
+            .pm
+            .get(profile_id)
+            .map_err(|error| MultizenError::Launch(format!("profile get: {error}")))?
+            .ok_or_else(|| MultizenError::NotFound(profile_id.into()))?;
+        let process = crate::chromix::start(
+            &profile,
+            binary_path,
+            companion_dir,
+            config,
+            runtime_dir,
+            skip_download,
+        )
+        .await?;
+        if let Err(error) = self.pm.mark_opened(profile_id) {
+            process.close().await;
+            return Err(MultizenError::Launch(format!("mark_opened: {error}")));
+        }
+        let launched = LaunchedProfile {
+            id: profile_id.into(),
+            cdp_endpoint: process.endpoint.clone(),
+            pid: process.pid,
+            started_at: chrono::Utc::now().to_rfc3339(),
+        };
+        self.registry
+            .insert(BrowserHandle {
+                profile_id: launched.id.clone(),
+                cdp_endpoint: launched.cdp_endpoint.clone(),
+                pid: launched.pid,
+                started_at: launched.started_at.clone(),
+                child: None,
+                bridge: None,
+                chromix: Some(process),
+            })
+            .await;
+        Ok(launched)
+    }
+
     pub async fn close(&self, profile_id: &str) -> Result<()> {
         let mut handle = match self.registry.remove(profile_id).await {
             Some(h) => h,
             None => return Ok(()),
         };
+        if let Some(process) = handle.chromix.take() {
+            process.close().await;
+        }
         // Stop bridge first (cuts network traffic).
         if let Some(bridge) = handle.bridge.take() {
             let _ = bridge.stop().await;

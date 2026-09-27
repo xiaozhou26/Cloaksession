@@ -2,8 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use multizen_core::{
-    CreateProfileInput, ExtensionConfig, MultizenError, Profile, ProfileSummary,
-    Result, UpdateProfileInput,
+    CreateProfileInput, ExtensionConfig, MultizenError, Profile, ProfileSummary, Result,
+    UpdateProfileInput,
 };
 use rusqlite::{params, Connection};
 use uuid::Uuid;
@@ -33,12 +33,16 @@ impl ProfileManager {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         run_migrations(&conn)?;
-        Ok(Self { conn, profiles_root: profiles_root.to_path_buf() })
+        Ok(Self {
+            conn,
+            profiles_root: profiles_root.to_path_buf(),
+        })
     }
 
     pub fn list(&self) -> Result<Vec<ProfileSummary>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, tags, last_opened_at, proxy, fingerprint, proxy_country, icon
+            "SELECT id, name, tags, last_opened_at, proxy, fingerprint, proxy_country, icon,
+                    chromix_options
              FROM profiles ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -49,6 +53,7 @@ impl ProfileManager {
                 tags: r.get::<_, String>(2)?,
                 proxy: r.get(4)?,
                 fingerprint: r.get::<_, String>(5)?,
+                chromix_options: r.get(8)?,
                 data_dir: String::new(),
                 created_at: String::new(),
                 updated_at: String::new(),
@@ -78,6 +83,7 @@ impl ProfileManager {
                 timezone: Some(fingerprint.timezone.clone()),
                 proxy_country: row.proxy_country,
                 device: Some(fingerprint.device),
+                chromix_options: serde_json::from_str(&row.chromix_options)?,
             });
         }
         Ok(out)
@@ -87,17 +93,27 @@ impl ProfileManager {
         let row = self.conn.query_row(
             "SELECT id, name, notes, tags, proxy, fingerprint, data_dir,
                     created_at, updated_at, last_opened_at, proxy_country,
-                    extensions, icon, start_url, search_provider
+                    extensions, icon, start_url, search_provider, chromix_options
              FROM profiles WHERE id = ?",
             params![id],
             |r| {
                 Ok(ProfileRow {
-                    id: r.get(0)?, name: r.get(1)?, notes: r.get(2)?,
-                    tags: r.get(3)?, proxy: r.get(4)?, fingerprint: r.get(5)?,
-                    data_dir: r.get(6)?, created_at: r.get(7)?, updated_at: r.get(8)?,
-                    last_opened_at: r.get(9)?, proxy_country: r.get(10)?,
-                    extensions: r.get(11)?, icon: r.get(12)?,
-                    start_url: r.get(13)?, search_provider: r.get(14)?,
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    notes: r.get(2)?,
+                    tags: r.get(3)?,
+                    proxy: r.get(4)?,
+                    fingerprint: r.get(5)?,
+                    data_dir: r.get(6)?,
+                    created_at: r.get(7)?,
+                    updated_at: r.get(8)?,
+                    last_opened_at: r.get(9)?,
+                    proxy_country: r.get(10)?,
+                    extensions: r.get(11)?,
+                    icon: r.get(12)?,
+                    start_url: r.get(13)?,
+                    search_provider: r.get(14)?,
+                    chromix_options: r.get(15)?,
                 })
             },
         );
@@ -118,10 +134,18 @@ impl ProfileManager {
             .full_fingerprint
             .unwrap_or_else(|| default_fingerprint(&id));
         if let Some(patch) = input.fingerprint {
-            if let Some(v) = patch.user_agent { fingerprint.user_agent = v; }
-            if let Some(v) = patch.locale { fingerprint.locale = v; }
-            if let Some(v) = patch.timezone { fingerprint.timezone = v; }
-            if let Some(v) = patch.country { fingerprint.country = v; }
+            if let Some(v) = patch.user_agent {
+                fingerprint.user_agent = v;
+            }
+            if let Some(v) = patch.locale {
+                fingerprint.locale = v;
+            }
+            if let Some(v) = patch.timezone {
+                fingerprint.timezone = v;
+            }
+            if let Some(v) = patch.country {
+                fingerprint.country = v;
+            }
         }
 
         let profile = Profile {
@@ -131,6 +155,7 @@ impl ProfileManager {
             tags: input.tags.unwrap_or_default(),
             proxy: input.proxy,
             fingerprint: fingerprint.clone(),
+            chromix_options: input.chromix_options.unwrap_or_default(),
             extensions: input.extensions,
             icon: input.icon,
             start_url: input.start_url,
@@ -158,27 +183,46 @@ impl ProfileManager {
         self.conn.execute(
             "INSERT INTO profiles
              (id, name, notes, tags, proxy, fingerprint, extensions, icon,
-              start_url, search_provider, data_dir, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              start_url, search_provider, data_dir, created_at, updated_at, chromix_options)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
-                profile.id, profile.name, profile.notes,
+                profile.id,
+                profile.name,
+                profile.notes,
                 serde_json::to_string(&profile.tags)?,
-                profile.proxy.as_ref().map(serde_json::to_string).transpose()?,
+                profile
+                    .proxy
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
                 serde_json::to_string(&profile.fingerprint)?,
-                profile.extensions.as_ref().map(serde_json::to_string).transpose()?,
-                profile.icon, profile.start_url, profile.search_provider,
-                profile.data_dir, profile.created_at, profile.updated_at,
+                profile
+                    .extensions
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
+                profile.icon,
+                profile.start_url,
+                profile.search_provider,
+                profile.data_dir,
+                profile.created_at,
+                profile.updated_at,
+                serde_json::to_string(&profile.chromix_options)?,
             ],
         )?;
         Ok(())
     }
 
     pub fn update(&self, id: &str, patch: UpdateProfileInput) -> Result<Profile> {
-        let existing = self.get(id)?.ok_or_else(|| MultizenError::NotFound(id.to_string()))?;
+        let existing = self
+            .get(id)?
+            .ok_or_else(|| MultizenError::NotFound(id.to_string()))?;
         let now = chrono::Utc::now().to_rfc3339();
 
         let proxy_changed = match (&patch.proxy, &existing.proxy) {
-            (Some(Some(new)), Some(old)) => serde_json::to_string(new)? != serde_json::to_string(old)?,
+            (Some(Some(new)), Some(old)) => {
+                serde_json::to_string(new)? != serde_json::to_string(old)?
+            }
             (Some(Some(_)), None) | (Some(None), Some(_)) => true,
             _ => false,
         };
@@ -219,21 +263,38 @@ impl ProfileManager {
         if let Some(fp) = patch.fingerprint {
             merged.fingerprint = fp;
         }
+        if let Some(options) = patch.chromix_options {
+            merged.chromix_options = options;
+        }
 
         self.conn.execute(
             "UPDATE profiles SET
                name = ?, notes = ?, tags = ?, proxy = ?, fingerprint = ?,
                extensions = ?, icon = ?, start_url = ?, search_provider = ?,
-               updated_at = ?, proxy_country = ?
+               updated_at = ?, proxy_country = ?, chromix_options = ?
              WHERE id = ?",
             params![
-                merged.name, merged.notes,
+                merged.name,
+                merged.notes,
                 serde_json::to_string(&merged.tags)?,
-                merged.proxy.as_ref().map(serde_json::to_string).transpose()?,
+                merged
+                    .proxy
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
                 serde_json::to_string(&merged.fingerprint)?,
-                merged.extensions.as_ref().map(serde_json::to_string).transpose()?,
-                merged.icon, merged.start_url, merged.search_provider,
-                merged.updated_at, merged.proxy_country, id,
+                merged
+                    .extensions
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
+                merged.icon,
+                merged.start_url,
+                merged.search_provider,
+                merged.updated_at,
+                merged.proxy_country,
+                serde_json::to_string(&merged.chromix_options)?,
+                id,
             ],
         )?;
         Ok(merged)
@@ -249,7 +310,8 @@ impl ProfileManager {
 
     pub fn delete(&self, id: &str) -> Result<()> {
         let existing = self.get(id)?;
-        self.conn.execute("DELETE FROM profiles WHERE id = ?", params![id])?;
+        self.conn
+            .execute("DELETE FROM profiles WHERE id = ?", params![id])?;
         if let Some(p) = existing {
             let _ = fs::remove_dir_all(&p.data_dir); // best-effort
         }
@@ -266,15 +328,25 @@ impl ProfileManager {
     }
 
     pub fn all_extension_refs(&self) -> Result<Vec<ExtensionRef>> {
-        let mut stmt = self.conn.prepare("SELECT id, data_dir, extensions FROM profiles")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, data_dir, extensions FROM profiles")?;
         let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
         })?;
         let mut out = Vec::new();
         for row in rows {
             let (profile_id, data_dir, ext_raw) = row?;
             for ext in normalize_extensions(ext_raw.as_deref()) {
-                out.push(ExtensionRef { profile_id: profile_id.clone(), data_dir: data_dir.clone(), ext });
+                out.push(ExtensionRef {
+                    profile_id: profile_id.clone(),
+                    data_dir: data_dir.clone(),
+                    ext,
+                });
             }
         }
         Ok(out)

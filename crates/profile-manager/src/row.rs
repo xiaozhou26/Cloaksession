@@ -8,6 +8,7 @@ pub struct ProfileRow {
     pub tags: String,
     pub proxy: Option<String>,
     pub fingerprint: String,
+    pub chromix_options: String,
     pub data_dir: String,
     pub created_at: String,
     pub updated_at: String,
@@ -22,11 +23,11 @@ pub struct ProfileRow {
 pub fn row_to_profile(row: ProfileRow) -> Profile {
     let fingerprint: FingerprintConfig =
         serde_json::from_str(&row.fingerprint).expect("corrupt fingerprint JSON");
-    let tags: Vec<String> =
-        serde_json::from_str(&row.tags).unwrap_or_default();
-    let proxy = row.proxy.as_deref().map(|s| {
-        serde_json::from_str::<ProxyConfig>(s).expect("corrupt proxy JSON")
-    });
+    let tags: Vec<String> = serde_json::from_str(&row.tags).unwrap_or_default();
+    let proxy = row
+        .proxy
+        .as_deref()
+        .map(|s| serde_json::from_str::<ProxyConfig>(s).expect("corrupt proxy JSON"));
     let extensions = normalize_extensions(row.extensions.as_deref());
     Profile {
         id: row.id,
@@ -35,7 +36,13 @@ pub fn row_to_profile(row: ProfileRow) -> Profile {
         tags,
         proxy,
         fingerprint,
-        extensions: if extensions.is_empty() { None } else { Some(extensions) },
+        chromix_options: serde_json::from_str(&row.chromix_options)
+            .expect("corrupt chromix options JSON"),
+        extensions: if extensions.is_empty() {
+            None
+        } else {
+            Some(extensions)
+        },
         icon: row.icon,
         start_url: row.start_url,
         search_provider: row.search_provider,
@@ -52,16 +59,42 @@ pub fn normalize_extensions(raw: Option<&str>) -> Vec<ExtensionConfig> {
     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) else {
         return Vec::new();
     };
-    let Some(arr) = parsed.as_array() else { return Vec::new() };
+    let Some(arr) = parsed.as_array() else {
+        return Vec::new();
+    };
     arr.iter()
         .map(|e| ExtensionConfig {
-            id: e.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            name: e.get("name").and_then(|v| v.as_str()).unwrap_or("Extension").to_string(),
-            version: e.get("version").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            scope: e.get("scope").and_then(|v| v.as_str()).unwrap_or("profile").to_string(),
+            id: e
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            name: e
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Extension")
+                .to_string(),
+            version: e
+                .get("version")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            scope: e
+                .get("scope")
+                .and_then(|v| v.as_str())
+                .unwrap_or("profile")
+                .to_string(),
             enabled: e.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
-            dir: e.get("dir").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            source: e.get("source").and_then(|v| v.as_str()).unwrap_or("file").to_string(),
+            dir: e
+                .get("dir")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            source: e
+                .get("source")
+                .and_then(|v| v.as_str())
+                .unwrap_or("file")
+                .to_string(),
         })
         .collect()
 }

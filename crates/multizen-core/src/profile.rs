@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 pub type ProfileId = String;
 
@@ -127,6 +128,8 @@ pub struct Profile {
     pub tags: Vec<String>,
     pub proxy: Option<ProxyConfig>,
     pub fingerprint: FingerprintConfig,
+    #[serde(default)]
+    pub chromix_options: Map<String, Value>,
     pub extensions: Option<Vec<ExtensionConfig>>,
     pub icon: Option<String>,
     pub start_url: Option<String>,
@@ -151,6 +154,8 @@ pub struct ProfileSummary {
     pub timezone: Option<String>,
     pub proxy_country: Option<String>,
     pub device: Option<DeviceFamily>,
+    #[serde(default)]
+    pub chromix_options: Map<String, Value>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -164,6 +169,7 @@ pub struct CreateProfileInput {
     pub proxy: Option<ProxyConfig>,
     /// Legacy partial fingerprint patch. Kept for MCP/source compatibility.
     pub fingerprint: Option<PartialFingerprintInput>,
+    pub chromix_options: Option<Map<String, Value>>,
     pub extensions: Option<Vec<ExtensionConfig>>,
     /// A complete fingerprint supplied by the Tauri UI. This is intentionally
     /// omitted from the serialized core contract; custom deserialization
@@ -188,6 +194,8 @@ impl<'de> Deserialize<'de> for CreateProfileInput {
             search_provider: Option<String>,
             proxy: Option<ProxyConfig>,
             fingerprint: Option<serde_json::Value>,
+            #[serde(default)]
+            chromix_options: Option<Map<String, Value>>,
             extensions: Option<Vec<ExtensionConfig>>,
         }
 
@@ -214,6 +222,7 @@ impl<'de> Deserialize<'de> for CreateProfileInput {
             search_provider: wire.search_provider,
             proxy: wire.proxy,
             fingerprint,
+            chromix_options: wire.chromix_options,
             extensions: wire.extensions,
             full_fingerprint,
         })
@@ -250,6 +259,8 @@ pub struct UpdateProfileInput {
     /// `PartialFingerprintInput` struct doesn't model (fontsDir,
     /// storageQuota, seed, screen, device, …).
     pub fingerprint: Option<FingerprintConfig>,
+    #[serde(default)]
+    pub chromix_options: Option<Map<String, Value>>,
     pub extensions: Option<Vec<ExtensionConfig>>,
 }
 

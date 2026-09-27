@@ -17,22 +17,29 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name);",
     )?;
-    add_column_if_missing(conn, "proxy_country")?;
-    add_column_if_missing(conn, "extensions")?;
-    add_column_if_missing(conn, "icon")?;
-    add_column_if_missing(conn, "start_url")?;
-    add_column_if_missing(conn, "search_provider")?;
+    add_column_if_missing(conn, "proxy_country", "TEXT")?;
+    add_column_if_missing(conn, "extensions", "TEXT")?;
+    add_column_if_missing(conn, "icon", "TEXT")?;
+    add_column_if_missing(conn, "start_url", "TEXT")?;
+    add_column_if_missing(conn, "search_provider", "TEXT")?;
+    add_column_if_missing(
+        conn,
+        "chromix_options",
+        "TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(chromix_options) AND json_type(chromix_options) = 'object')",
+    )?;
     Ok(())
 }
 
-fn add_column_if_missing(conn: &Connection, col: &str) -> Result<()> {
+fn add_column_if_missing(conn: &Connection, col: &str, definition: &str) -> Result<()> {
     let mut stmt = conn.prepare("PRAGMA table_info(profiles)")?;
     let cols: Vec<String> = stmt
         .query_map([], |r| r.get::<_, String>(1))?
         .filter_map(|r| r.ok())
         .collect();
     if !cols.iter().any(|c| c == col) {
-        conn.execute_batch(&format!("ALTER TABLE profiles ADD COLUMN {col} TEXT"))?;
+        conn.execute_batch(&format!(
+            "ALTER TABLE profiles ADD COLUMN {col} {definition}"
+        ))?;
     }
     Ok(())
 }

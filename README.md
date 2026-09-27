@@ -2,7 +2,7 @@
 
 Cloaksession 是一个基于 **Rust + Tauri 2 + React** 的桌面浏览器环境管理工具。它为每个 Profile 管理独立的浏览器用户数据目录、代理和指纹配置，支持手动使用，也通过本地 **MCP（Model Context Protocol）** 接口供 AI 客户端操作浏览器。
 
-本仓库提供管理应用及浏览器启动、Chrome DevTools Protocol（CDP，浏览器调试协议）控制逻辑，**不包含浏览器内核**。当前默认引擎为 CloakBrowser，另有 Chrome for Testing（CFT）兼容路径。以下以 Windows 为主要使用和开发环境；发布工作流包含其他平台，但不代表所有功能已经过跨平台验证。
+本仓库提供管理应用及浏览器启动、Chrome DevTools Protocol（CDP，浏览器调试协议）控制逻辑，**不包含浏览器内核**。当前默认引擎为 CloakBrowser，另有 Chrome for Testing（CFT）兼容路径，并可选接入 Chromix Node SDK。以下以 Windows 为主要使用和开发环境；发布工作流包含其他平台，但不代表所有功能已经过跨平台验证。
 
 - 源码：[xiaozhou26/Cloaksession](https://github.com/xiaozhou26/Cloaksession)
 - 下载：[GitHub Releases](https://github.com/xiaozhou26/Cloaksession/releases)（以实际发布附件为准）
@@ -19,18 +19,28 @@ Cloaksession 是一个基于 **Rust + Tauri 2 + React** 的桌面浏览器环境
 
 ## 浏览器引擎与限制
 
-| 项目 | CloakBrowser（默认） | Chrome for Testing（`cft`） |
-| --- | --- | --- |
-| 运行文件 | 需自行准备支持相应参数的 CloakBrowser 可执行文件 | 需自行准备 CFT / 兼容 Chromium 可执行文件 |
-| 指纹应用方式 | 主要通过启动时的 `--fingerprint-*` 参数交给内核处理 | 标准启动参数、CDP User-Agent 覆盖及页面预加载脚本 |
-| 当前覆盖范围 | 启动器传递平台、语言、时区、屏幕、GPU、字体、配额、种子等参数，最终行为由内核决定 | 当前脚本覆盖部分 navigator、屏幕和 WebGL 属性；未完整实现时区、字体、存储配额及 Client Hints 的等效覆盖 |
-| 浏览器数据目录 | `profiles/<id>/engines/cloakbrowser/` | `profiles/<id>/` |
+| 项目 | CloakBrowser（默认） | Chrome for Testing（`cft`） | Chromix（`chromix`） |
+| --- | --- | --- | --- |
+| 运行文件 | 需自行准备支持相应参数的 CloakBrowser 可执行文件 | 需自行准备 CFT / 兼容 Chromium 可执行文件 | 可填写本地 Chromix 可执行文件；留空时由 SDK 解析或下载 |
+| 指纹应用方式 | 主要通过启动时的 `--fingerprint-*` 参数交给内核处理 | 标准启动参数、CDP User-Agent 覆盖及页面预加载脚本 | 固定 Chromix Node SDK 通过 sidecar 启动，前端完整编辑公开指纹 flags、SDK options 和原始 `args` |
+| 当前覆盖范围 | 启动器传递平台、语言、时区、屏幕、GPU、字体、配额、种子等参数，最终行为由内核决定 | 当前脚本覆盖部分 navigator、屏幕和 WebGL 属性；未完整实现时区、字体、存储配额及 Client Hints 的等效覆盖 | 覆盖 SDK README 公开指纹参数、平台/品牌/硬件/屏幕/GPU/字体/区域/配额/WebRTC/音频/编解码器/CSS/input/噪声/Cookie/FakeShadowRoot/Canvas Bridge 等；实际效果依赖匹配的 Chromix 二进制 |
+| 浏览器数据目录 | `profiles/<id>/engines/cloakbrowser/` | `profiles/<id>/` | `profiles/<id>/engines/chromix/` |
 
 **引擎是应用级设置，不是每个 Profile 单独选择。** 切换引擎不会自动切换可执行文件，也不会迁移两套用户数据目录中的 Cookie 或登录状态；需要同时配置匹配的内核路径并重启应用。
 
+### Chromix 配置
+
+1. 在 **Settings → Browser engine** 选择 **Chromix**。
+2. 在 **Chromix SDK configuration** 中设置 Node.js 可执行文件、全局 SDK options JSON 和 Node 环境 JSON。保存后重启应用。
+3. 创建或编辑 Profile，在 **Chromix fingerprint** 中按 Identity、Hardware、Display、GPU、Fonts、Regional、Storage、Network、Media、Preferences、Privacy、SDK 和 Advanced 分组编辑公开参数。
+4. 使用 **Raw options.args** 编辑完整原始启动参数。全局或 Profile 的 **SDK options JSON** 可保存 README 中的任意 JSON 字段，包含未知字段、嵌套对象、数组、`false`、`null`、空字符串、重复参数和字符串形式的 uint64 seed。
+5. 启动时使用全局 options，再叠加当前 Profile 的 `chromixOptions`；Profile 的数组和嵌套对象按 SDK 选项整体覆盖。Cloaksession 自动提供每个 Profile 的用户目录、扩展目录、loopback CDP 端口和起始页。
+
+Chromix 资源固定到 GitHub main commit `39b9ea1bd262c2eb6306f3e23279398a6476c845`，并包含上游文件哈希清单。资源目录为 `crates/tauri-app/resources/chromix/`；开发或打包钩子会执行 `npm ci`。Node.js 需要版本 20 或更高。`devicePool` 是要求 Python SDK、证据文件和直接 runtime verification 的 measured-device 入口，CDP sidecar 会明确拒绝该模式；它不属于普通指纹字段编辑。
+
 注意以下边界：
 
-- 当前没有接通浏览器内核自动下载。界面中的 “Default (auto-download)” 和 “Skip auto-download” 文案不代表已有下载能力，必须准备本地可执行文件。
+- CloakBrowser 和 CFT 路径当前没有接通浏览器内核自动下载，必须准备本地可执行文件。Chromix 的 binary cache/download 由固定 Node SDK 管理，可在 Settings 中通过 SDK options、environment 和 Skip auto-download 控制。
 - 指纹字段可以保存，并不表示所有字段在每个内核、页面和平台都能一致生效。设备预设只是配置，不等于虚拟机或真实硬件仿真。
 - CDP 自动化、页面脚本覆盖和代理启动参数都不构成不可检测、匿名或防泄漏保证。请在实际浏览器版本和网络环境中自行验证。
 - CDP 驱动的 `safe_cdp` 检查尚未拦截 chromiumoxide 的自动域启用；不能将其视为完整的保护层，某些 CloakBrowser 构建可能存在兼容性或崩溃风险。
@@ -56,7 +66,7 @@ Cloaksession 是一个基于 **Rust + Tauri 2 + React** 的桌面浏览器环境
 4. 进入 **Settings → Browser engine / Browser binary**，选择匹配的引擎，通过 **Browse…** 指向实际可执行文件，建议使用绝对路径。
 5. **完全退出并重新打开 Cloaksession**，再编辑 Profile 的代理、指纹和扩展，点击启动。一般 Profile 配置更改在该 Profile 下次启动时应用。
 
-浏览器路径的优先级为：非空 `browserBinaryPath` 设置 → 环境变量 `MULTIZEN_BROWSER_BINARY` → 平台默认路径。Windows 默认仅使用 `cloakbrowser.exe` 这个文件名；若系统找不到它，启动会失败，并不会自动下载安装。
+CloakBrowser/CFT 浏览器路径的优先级为：非空 `browserBinaryPath` 设置 → 环境变量 `MULTIZEN_BROWSER_BINARY` → 平台默认路径。Chromix 选择非空路径后交给 SDK；路径为空时按 `contextOptions.executablePath` → `launchOptions.executablePath` → `CLOAKBROWSER_BINARY_PATH` → SDK cache/download 解析。Windows 旧引擎默认仅使用 `cloakbrowser.exe` 这个文件名；若系统找不到它，启动会失败。
 
 首次引导会保存 `usageReporting` 选择，默认关闭；当前源码没有接通界面所描述的每日心跳发送逻辑。不要据此推断应用完全不联网：代理查询会访问 `ipapi.co`，扩展下载访问 Google 服务，更新检查访问 GitHub。新建或缺少 `autoUpdate` 字段的设置由 `SettingsStore` 按开启自动检查读取，可在 Settings 中关闭。
 
@@ -69,7 +79,7 @@ Cloaksession 是一个基于 **Rust + Tauri 2 + React** 的桌面浏览器环境
 - Visual Studio Build Tools 的 C++ 桌面开发组件和 Windows SDK。
 - Microsoft Edge WebView2 Runtime（管理界面的 WebView，不是被管理的浏览器内核）。
 - Node.js **22** 和 npm，与当前发布工作流一致。
-- 可运行的 CloakBrowser 或 CFT；仅编译和多数测试不需要实际启动内核。
+- 可运行的 CloakBrowser、CFT 或与固定 SDK 匹配的 Chromix 二进制；仅编译和多数测试不需要实际启动内核。
 
 在 PowerShell 中执行：
 
@@ -108,7 +118,7 @@ cd crates/tauri-app
 | 文件或目录 | 内容 |
 | --- | --- |
 | `profiles.db` | SQLite Profile 配置，包含代理、指纹和扩展引用；启用 WAL，运行时可能伴有 `-wal` / `-shm` 文件 |
-| `profiles/` | 每个 Profile 的浏览器用户数据；引擎子目录见上表 |
+| `profiles/` | 每个 Profile 的浏览器用户数据；CloakBrowser 和 Chromix 使用引擎子目录，CFT 使用 Profile 根目录 |
 | `settings.json` | 应用设置，JSON 键使用 camelCase |
 | `mcp-token` | MCP Bearer 凭据，在应用启动时读取或生成 |
 | `extensions/` | 共享的解包扩展文件 |
@@ -179,7 +189,7 @@ cargo check --workspace
 cargo test --workspace
 ```
 
-前端构建包含 TypeScript 检查；当前 `package.json` 没有单独的 lint 或前端测试脚本。Rust 测试覆盖 Profile / 设置持久化、启动参数、代理桥接、行为算法、CDP 辅助逻辑和 MCP 工具与传输。普通测试不等同于真实内核的端到端验证。
+前端构建包含 TypeScript 检查；当前 `package.json` 没有单独的 lint 或前端测试脚本。Rust 测试覆盖 Profile / 设置持久化、启动参数、代理桥接、行为算法、CDP 辅助逻辑和 MCP 工具与传输。普通测试不等同于真实内核的端到端验证。Chromix 资源测试还包括固定上游 SDK 契约测试；真实二进制 smoke 需要设置 `CHROMIX_TEST_BINARY`，并应按目标二进制重新核对硬件与存储字段。
 
 需要真实浏览器的测试默认标记为忽略，仅加环境变量还不够，必须同时传 `-- --ignored`：
 

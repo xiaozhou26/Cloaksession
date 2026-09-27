@@ -11,6 +11,11 @@
 
 # Planning docs
 /docs/
+!/docs/
+!/docs/ACCEPTANCE.md
+
+# Chromix SDK runtime dependencies
+/crates/tauri-app/resources/chromix/node_modules/
 
 # Tauri dev logs
 tauri-*.log

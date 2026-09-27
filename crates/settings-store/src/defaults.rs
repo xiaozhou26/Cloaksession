@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use multizen_core::{AppSettings, BrowserEngine, Result};
+use multizen_core::{AppSettings, BrowserEngine, ChromixSettings, Result};
 use serde::Deserialize;
 
 #[derive(Debug, Default, Deserialize)]
@@ -11,6 +11,7 @@ struct RawSettings {
     mcp_http_port: Option<u16>,
     browser_engine: Option<String>,
     browser_binary_path: Option<String>,
+    chromix: Option<ChromixSettings>,
     skip_browser_download: Option<bool>,
     auto_update: Option<bool>,
     usage_reporting: Option<bool>,
@@ -53,9 +54,11 @@ impl SettingsStore {
         merged.browser_engine = match raw.browser_engine.as_deref() {
             Some("cft") => BrowserEngine::Cft,
             Some("cloakbrowser") => BrowserEngine::Cloakbrowser,
+            Some("chromix") => BrowserEngine::Chromix,
             _ => BrowserEngine::default(),
         };
         merged.browser_binary_path = raw.browser_binary_path.filter(|s| !s.trim().is_empty());
+        merged.chromix = raw.chromix.unwrap_or_default();
         merged.skip_browser_download = raw.skip_browser_download.unwrap_or(false);
         merged.auto_update = raw.auto_update.unwrap_or(true);
         merged.usage_reporting = raw.usage_reporting.unwrap_or(false);

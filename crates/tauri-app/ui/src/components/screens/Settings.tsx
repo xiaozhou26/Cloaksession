@@ -15,6 +15,7 @@ import {
   Zap,
 } from "lucide-react";
 import { Pill } from "../atoms";
+import { ChromixSettingsEditor } from "./ChromixSettingsEditor";
 import { relativeTime } from "../../lib/relativeTime";
 import type { AppSettings, SystemInfo, UpdateStatus } from "../../types";
 
@@ -25,6 +26,7 @@ interface Props {
 export function Settings({ onImport }: Props): JSX.Element {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [info, setInfo] = useState<SystemInfo | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenShown, setTokenShown] = useState(false);
@@ -34,7 +36,7 @@ export function Settings({ onImport }: Props): JSX.Element {
   useEffect(() => {
     let unlisten = (): void => {};
     let active = true;
-    void settingsApi.get().then(setSettings);
+    void settingsApi.get().then(setSettings).catch((error) => setSettingsError(String(error)));
     void system.info().then(setInfo);
     void update.status().then(setUpdateStatus);
     void update.lastChecked().then(setLastChecked);
@@ -54,8 +56,13 @@ export function Settings({ onImport }: Props): JSX.Element {
 
   async function patch(p: Partial<AppSettings>): Promise<void> {
     if (!settings) return;
-    const next = await settingsApi.update(p);
-    setSettings(next);
+    try {
+      const next = await settingsApi.update(p);
+      setSettings(next);
+      setSettingsError(null);
+    } catch (error) {
+      setSettingsError(`Could not save settings: ${String(error)}`);
+    }
   }
 
   async function checkForUpdates(): Promise<void> {
@@ -80,19 +87,23 @@ export function Settings({ onImport }: Props): JSX.Element {
   if (!settings) {
     return (
       <div className="flex-1 overflow-auto p-8">
-        <div className="max-w-[720px] mx-auto text-[13px] text-slate-500">Loading…</div>
+        <div className="max-w-[720px] mx-auto text-[13px] text-slate-500">
+          {settingsError ? <p role="alert" className="text-red-300">{settingsError}</p> : "Loading…"}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-auto" style={{ padding: "24px 32px" }}>
+    <div role="region" aria-label="Settings" className="flex-1 min-w-0 overflow-auto px-3 py-5 sm:px-8 sm:py-6">
       <div className="max-w-[720px] mx-auto">
         <div className="text-lg font-bold tracking-tight text-slate-100 mb-1.5">Settings</div>
         <div className="text-[13px] text-slate-500 mb-5">
-          MCP server, archives, build info. Configuration is local — Cloaksession does not call any
-          external API on your behalf.
+          MCP server, browser startup, archives and build info. Configuration is stored locally.
+          Chromix SDK downloads and optional GeoIP lookups follow your SDK settings.
         </div>
+
+        {settingsError && <p role="alert" className="text-[12px] text-red-300 mb-3 break-words">{settingsError}</p>}
 
         <Row
           icon={<Zap size={16} strokeWidth={1.5} />}
@@ -106,7 +117,7 @@ export function Settings({ onImport }: Props): JSX.Element {
 
             {info?.mcpHttpUrl && (
               <div
-                className="flex-1 min-w-[260px] flex items-center gap-2"
+                className="flex-1 min-w-0 basis-[220px] flex items-center gap-2"
                 style={{
                   padding: "8px 12px",
                   borderRadius: 10,
@@ -114,7 +125,7 @@ export function Settings({ onImport }: Props): JSX.Element {
                   boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.06)",
                 }}
               >
-                <span className="flex-1 mono text-[12px] text-slate-300 truncate">
+                <span className="flex-1 min-w-0 mono text-[12px] text-slate-300 truncate">
                   {info.mcpHttpUrl}
                 </span>
                 <button
@@ -145,7 +156,7 @@ export function Settings({ onImport }: Props): JSX.Element {
                   boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.06)",
                 }}
               >
-                <span className="flex-1 mono text-[12px] text-slate-300 truncate">
+                <span className="flex-1 min-w-0 mono text-[12px] text-slate-300 truncate">
                   {tokenShown ? info.mcpAuthToken : "•".repeat(24)}
                 </span>
                 <button
@@ -182,7 +193,7 @@ export function Settings({ onImport }: Props): JSX.Element {
         <Row
           icon={<Chrome size={16} strokeWidth={1.5} />}
           title="Browser engine"
-          desc="Applied on next app launch."
+          desc="Global startup setting. Restart the app to apply; switching engines keeps each engine’s saved configuration."
         >
           <div className="grid gap-2 sm:grid-cols-2">
             {engineOptions.map((option) => {
@@ -191,6 +202,7 @@ export function Settings({ onImport }: Props): JSX.Element {
                 <button
                   key={option.value}
                   type="button"
+                  aria-pressed={selected}
                   onClick={() => void patch({ browserEngine: option.value })}
                   className="text-left p-3 rounded-lg transition-colors"
                   style={{
@@ -202,7 +214,7 @@ export function Settings({ onImport }: Props): JSX.Element {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[13px] font-medium text-slate-100">{option.label}</span>
-                    {selected && <Pill kind="running">active</Pill>}
+                    {selected && <Pill kind="running">selected</Pill>}
                   </div>
                   <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
                     {option.description}
@@ -213,18 +225,38 @@ export function Settings({ onImport }: Props): JSX.Element {
           </div>
         </Row>
 
+        {settings.browserEngine === "chromix" && (
+          <Row
+            icon={<Chrome size={16} strokeWidth={1.5} />}
+            title="Chromix SDK configuration"
+            desc="Full SDK JSON, Node.js runtime and environment overrides. Changes apply after the next app restart."
+          >
+            <ChromixSettingsEditor
+              value={settings.chromix}
+              onSave={async (chromix) => {
+                const next = await settingsApi.update({ chromix });
+                setSettings(next);
+                setSettingsError(null);
+              }}
+            />
+          </Row>
+        )}
+
         <Row
           icon={<FileSearch size={16} strokeWidth={1.5} />}
           title="Browser binary"
-          desc="Point Cloaksession at your own Chromium / CloakBrowser executable instead of auto-downloading. Applied on next app launch."
+          desc={settings.browserEngine === "chromix"
+            ? "Use a matching Chromix executable. With no custom path, binary resolution and downloads are handled by the Chromix SDK, not the CloakBrowser / Chrome for Testing downloader. Restart the app to apply."
+            : "Point Cloaksession at your own Chromium / CloakBrowser executable instead of auto-downloading. Restart the app to apply."}
         >
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <input
+              aria-label="Browser binary path"
               type="text"
               value={settings.browserBinaryPath ?? ""}
-              onChange={(e) => void patch({ browserBinaryPath: e.target.value || undefined })}
-              placeholder="Default (auto-download)"
-              className="flex-1 min-w-0 h-8 px-2.5 text-[12px] text-slate-200 rounded-lg bg-white/[0.03] outline-none"
+              onChange={(e) => void patch({ browserBinaryPath: e.target.value })}
+              placeholder={settings.browserEngine === "chromix" ? "Default (Chromix SDK resolution)" : "Default (auto-download)"}
+              className="flex-1 basis-[180px] min-w-0 h-8 px-2.5 text-[12px] text-slate-200 rounded-lg bg-white/[0.03] outline-none"
               style={{ boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.07)" }}
             />
             <button
@@ -241,7 +273,7 @@ export function Settings({ onImport }: Props): JSX.Element {
               <button
                 type="button"
                 className="btn-ghost px-2.5 h-8 text-[12px] rounded-[9px]"
-                onClick={() => void patch({ browserBinaryPath: undefined })}
+                onClick={() => void patch({ browserBinaryPath: "" })}
               >
                 Reset
               </button>
@@ -254,11 +286,14 @@ export function Settings({ onImport }: Props): JSX.Element {
               onChange={(e) => void patch({ skipBrowserDownload: e.target.checked })}
               className="w-3.5 h-3.5 rounded accent-purple-500"
             />
-            Skip auto-download (use cached binary or the custom path above)
+            {settings.browserEngine === "chromix"
+              ? "Skip Chromix SDK auto-download (use a local or SDK-cached binary)"
+              : "Skip auto-download (use cached binary or the custom path above)"}
           </label>
           <div className="text-[11px] text-slate-600 mt-2 leading-relaxed">
-            When on, Cloaksession never fetches a browser runtime. Launch fails with a clear
-            error if no binary is available. Pair with a custom path for fully offline setups.
+            {settings.browserEngine === "chromix"
+              ? "For offline Chromix launches, use an installed SDK cache entry, a custom binary path or CLOAKBROWSER_BINARY_PATH in Environment JSON. Launch fails if no local binary is available. The SDK’s cache and download settings are separate from the legacy engines."
+              : "When on, Cloaksession never fetches a browser runtime. Launch fails with a clear error if no binary is available. Pair with a custom path for fully offline setups."}
           </div>
         </Row>
 
@@ -267,7 +302,7 @@ export function Settings({ onImport }: Props): JSX.Element {
           title="Archives"
           desc=".mzar files are encrypted bundles of profiles — cookies, login state, fingerprints, notes — protected with a passphrase you set at export time."
         >
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               className="btn-secondary px-3 py-[7px] text-[12px] rounded-[9px]"
@@ -368,6 +403,11 @@ const engineOptions: Array<{
     description: "Source-patched Chromium from CloakHQ releases. Primary runtime.",
   },
   {
+    value: "chromix",
+    label: "Chromix",
+    description: "Chromix Node SDK with full JSON options and environment configuration.",
+  },
+  {
     value: "cft",
     label: "Chrome for Testing",
     description: "Compatibility fallback using Google's official automation build.",
@@ -413,7 +453,7 @@ function Row({
       }}
     >
       <div
-        className="flex items-center justify-center flex-shrink-0"
+        className="hidden sm:flex items-center justify-center flex-shrink-0"
         style={{
           width: 36,
           height: 36,
@@ -425,7 +465,7 @@ function Row({
       >
         {icon}
       </div>
-      <div className="flex-1">
+      <div className="flex-1 min-w-0 break-words">
         <div className="text-[13px] font-semibold text-slate-100">{title}</div>
         {desc && (
           <div className="text-[12px] text-slate-500 mt-1 leading-relaxed max-w-[480px]">

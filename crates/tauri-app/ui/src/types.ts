@@ -125,6 +125,7 @@ export interface Profile {
   tags: string[];
   proxy?: ProxyConfig | null;
   fingerprint: FingerprintConfig;
+  chromixOptions?: Record<string, unknown>;
   extensions?: ExtensionConfig[] | null;
   icon?: string | null;
   startUrl?: string | null;
@@ -166,6 +167,7 @@ export interface CreateProfileInput {
   proxy?: ProxyConfig;
   /** Full UI fingerprint, or the legacy partial MCP-compatible patch. */
   fingerprint?: FingerprintConfig | PartialFingerprintInput;
+  chromixOptions?: Record<string, unknown>;
   extensions?: ExtensionConfig[];
 }
 
@@ -179,6 +181,7 @@ export interface UpdateProfileInput {
   proxy?: ProxyConfig | null;
   /** Whole-replace — the UI always holds a complete FingerprintConfig. */
   fingerprint?: FingerprintConfig;
+  chromixOptions?: Record<string, unknown>;
   extensions?: ExtensionConfig[];
 }
 
@@ -193,7 +196,13 @@ export interface LaunchedProfile {
 // Settings (crates/multizen-core/src/settings.rs)
 // ---------------------------------------------------------------------------
 
-export type BrowserEngine = "cft" | "cloakbrowser";
+export type BrowserEngine = "cft" | "cloakbrowser" | "chromix";
+
+export interface ChromixSettings {
+  nodePath: string;
+  options: Record<string, unknown>;
+  environment: Record<string, string>;
+}
 
 export interface AppSettings {
   theme: string;
@@ -201,6 +210,7 @@ export interface AppSettings {
   mcpHttpPort: number;
   browserEngine: BrowserEngine;
   browserBinaryPath?: string | null;
+  chromix: ChromixSettings;
   skipBrowserDownload: boolean;
   autoUpdate: boolean;
   usageReporting: boolean;

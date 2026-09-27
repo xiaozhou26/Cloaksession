@@ -7,7 +7,7 @@ import type { JSX, ReactNode } from "react";
  * Keeping them here means create/edit never drift apart visually.
  */
 
-export type SectionId = "general" | "browser" | "proxy" | "extensions" | "fingerprint";
+export type SectionId = "general" | "browser" | "proxy" | "extensions" | "fingerprint" | "chromix";
 
 export const SECTIONS: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
   { id: "general", label: "General", icon: IdCard },
@@ -15,6 +15,7 @@ export const SECTIONS: Array<{ id: SectionId; label: string; icon: LucideIcon }>
   { id: "proxy", label: "Proxy", icon: Network },
   { id: "extensions", label: "Extensions", icon: Blocks },
   { id: "fingerprint", label: "Fingerprint", icon: Fingerprint },
+  { id: "chromix", label: "Chromix fingerprint", icon: Fingerprint },
 ];
 
 /** Height of the sheet body; the content pane scrolls inside it, the rail doesn't. */
@@ -35,8 +36,7 @@ export function SectionRail({
 }): JSX.Element {
   return (
     <nav
-      className="flex flex-col shrink-0 py-3 px-2 gap-0.5 overflow-y-auto min-h-0"
-      style={{ width: 168, borderRight: "1px solid rgba(255,255,255,0.05)" }}
+      className="flex flex-row flex-wrap sm:flex-col sm:flex-nowrap w-full sm:w-[168px] shrink-0 py-2 sm:py-3 px-2 gap-0.5 overflow-y-auto min-h-0 border-b sm:border-b-0 sm:border-r border-white/5"
     >
       {SECTIONS.map(({ id, label, icon: Icon }) => {
         const active = section === id;
@@ -65,7 +65,7 @@ export function SectionRail({
         );
       })}
 
-      {footer && <div className="mt-auto px-1.5 pt-2">{footer}</div>}
+      {footer && <div className="w-full sm:mt-auto px-1.5 pt-2">{footer}</div>}
     </nav>
   );
 }

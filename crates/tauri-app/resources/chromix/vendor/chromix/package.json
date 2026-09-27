@@ -1,0 +1,20 @@
+{
+  "name": "@xiaoxiaofeihh/chromix",
+  "version": "0.1.0",
+  "description": "Drive the Chromix stealth Chromium engine with a CloakBrowser-compatible API.",
+  "type": "module",
+  "main": "index.js",
+  "exports": { ".": "./index.js", "./puppeteer": "./puppeteer.js", "./cookies": "./cookies.js" },
+  "bin": { "chromix": "cli.js" },
+  "files": ["index.js", "puppeteer.js", "cookies.js", "_profile.js", "_binary.js", "_fonts.js", "_persona.js", "_fingerprint.js", "_network.js", "_socks_auth.js", "_device_pool.js", "cli.js", "README.md", "LICENSE"],
+  "scripts": { "test": "node --test test/*.test.*" },
+  "engines": { "node": ">=18" },
+  "dependencies": { "yauzl": "^3.4.0" },
+  "keywords": ["chromium", "stealth", "browser", "automation", "anti-bot", "cloakbrowser"],
+  "license": "BSD-3-Clause",
+  "author": "xiaozhou26",
+  "repository": { "type": "git", "url": "git+https://github.com/xiaozhou26/Chromix.git" },
+  "homepage": "https://github.com/xiaozhou26/Chromix#readme",
+  "bugs": { "url": "https://github.com/xiaozhou26/Chromix/issues" },
+  "publishConfig": { "access": "public" }
+}

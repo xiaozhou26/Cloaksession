@@ -2,6 +2,7 @@ import { fingerprint as fingerprintApi, profiles } from "../../lib/ipc";
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from "react";
 import { Kbd } from "../atoms";
 import { FingerprintForm } from "./FingerprintForm";
+import { ChromixProfileOptions } from "./ChromixProfileOptions";
 import { ProxyTester } from "./ProxyTester";
 import { ExtensionsSection } from "./ExtensionsSection";
 import { EmojiField } from "./EmojiField";
@@ -61,6 +62,7 @@ export function NewProfileSheet({ onCancel, onCreated, onDirtyChange }: Props): 
   const [notes, setNotes] = useState("");
   const [extensions, setExtensions] = useState<ExtensionConfig[]>([]);
   const [fingerprint, setFingerprint] = useState<FingerprintConfig | null>(null);
+  const [chromixOptions, setChromixOptions] = useState<Record<string, unknown>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,6 +94,7 @@ export function NewProfileSheet({ onCancel, onCreated, onDirtyChange }: Props): 
       proxy.username !== "" ||
       proxy.password !== "" ||
       extensions.length > 0 ||
+      Object.keys(chromixOptions).length > 0 ||
       (fingerprint !== null &&
         initialFingerprintRef.current !== null &&
         JSON.stringify(fingerprint) !== initialFingerprintRef.current);
@@ -99,7 +102,7 @@ export function NewProfileSheet({ onCancel, onCreated, onDirtyChange }: Props): 
       dirtyRef.current = dirty;
       onDirtyChange?.(dirty);
     }
-  }, [name, tagsRaw, icon, notes, startUrl, proxy, extensions, fingerprint, onDirtyChange]);
+  }, [name, tagsRaw, icon, notes, startUrl, proxy, extensions, fingerprint, chromixOptions, onDirtyChange]);
 
   function buildProxy(): ProxyConfig | undefined {
     if (!proxy.enabled) return undefined;
@@ -158,6 +161,7 @@ export function NewProfileSheet({ onCancel, onCreated, onDirtyChange }: Props): 
         startUrl: startUrl.trim() || undefined,
         proxy: built,
         fingerprint,
+        chromixOptions,
         extensions: extensions.length > 0 ? extensions : undefined,
       });
       onCreated(created.id, autoLaunch);
@@ -178,7 +182,7 @@ export function NewProfileSheet({ onCancel, onCreated, onDirtyChange }: Props): 
 
   return (
     <div className="flex flex-col" style={{ height: SHEET_HEIGHT }} onKeyDown={onKeyDown}>
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-col sm:flex-row flex-1 min-h-0">
         <SectionRail
           section={section}
           onSelect={setSection}
@@ -186,7 +190,7 @@ export function NewProfileSheet({ onCancel, onCreated, onDirtyChange }: Props): 
         />
 
         {/* Content pane — only this scrolls */}
-        <div className="flex-1 min-w-0 overflow-y-auto px-5 py-4">
+        <div className="flex-1 min-h-0 min-w-0 overflow-y-auto px-5 py-4">
           {section === "general" && (
             <div className="space-y-3">
               <div className="flex gap-2.5 items-end">
@@ -324,6 +328,10 @@ export function NewProfileSheet({ onCancel, onCreated, onDirtyChange }: Props): 
               staged={extensions}
               onStagedChange={setExtensions}
             />
+          )}
+
+          {section === "chromix" && (
+            <ChromixProfileOptions options={chromixOptions} onChange={setChromixOptions} />
           )}
 
           {section === "fingerprint" &&

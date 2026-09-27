@@ -11,6 +11,10 @@ pub async fn bootstrap_targets(
     engine: BrowserEngine,
     webrtc_spoof_ip: Option<&str>,
 ) -> Result<()> {
+    // Chromix owns identity and context emulation through its SDK.
+    if engine == BrowserEngine::Chromix {
+        return Ok(());
+    }
     // C1: document the existing correct behavior. For CloakBrowser, only
     // the locale evaluate runs below (webrtc/preload are gated to CFT), and
     // CloakBrowser relies on launch-time `--fingerprint-*` flags (P2.5)

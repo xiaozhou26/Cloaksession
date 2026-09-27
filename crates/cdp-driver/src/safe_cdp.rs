@@ -62,6 +62,6 @@ impl Default for SafeEnableRefcount {
 pub fn cloak_allows_domain(domain: &str, engine: BrowserEngine) -> bool {
     match engine {
         BrowserEngine::Cloakbrowser => !CLOAK_RISKY_ENABLE_DOMAINS.contains(&domain),
-        BrowserEngine::Cft => true,
+        BrowserEngine::Cft | BrowserEngine::Chromix => true,
     }
 }

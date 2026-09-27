@@ -17,11 +17,27 @@ fn creates_profiles_table_with_all_columns() {
         .filter_map(Result::ok)
         .collect();
     for expected in [
-        "id", "name", "notes", "tags", "proxy", "fingerprint", "data_dir",
-        "created_at", "updated_at", "last_opened_at", "proxy_country",
-        "extensions", "icon", "start_url", "search_provider",
+        "id",
+        "name",
+        "notes",
+        "tags",
+        "proxy",
+        "fingerprint",
+        "data_dir",
+        "created_at",
+        "updated_at",
+        "last_opened_at",
+        "proxy_country",
+        "extensions",
+        "icon",
+        "start_url",
+        "search_provider",
+        "chromix_options",
     ] {
-        assert!(cols.iter().any(|c| c == expected), "missing column: {expected}");
+        assert!(
+            cols.iter().any(|c| c == expected),
+            "missing column: {expected}"
+        );
     }
 }
 
@@ -30,9 +46,14 @@ fn is_idempotent() {
     let conn = open_mem();
     run_migrations(&conn).unwrap();
     run_migrations(&conn).unwrap(); // must not error
+
     // index exists
     let idx: i64 = conn
-        .query_row("SELECT count(*) FROM sqlite_master WHERE name='idx_profiles_name'", [], |r| r.get(0))
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name='idx_profiles_name'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(idx, 1);
 }
@@ -64,4 +85,57 @@ fn adds_missing_columns_to_old_schema() {
     assert!(cols.iter().any(|c| c == "icon"));
     assert!(cols.iter().any(|c| c == "start_url"));
     assert!(cols.iter().any(|c| c == "search_provider"));
+    assert!(cols.iter().any(|c| c == "chromix_options"));
+}
+
+#[test]
+fn chromix_options_column_defaults_to_json_object_and_rejects_other_types() {
+    let conn = open_mem();
+    run_migrations(&conn).unwrap();
+    conn.execute_batch(
+        "INSERT INTO profiles (id, name, fingerprint, data_dir, created_at, updated_at)
+         VALUES ('p', 'test', '{}', '/tmp/p', 'created', 'updated');",
+    )
+    .unwrap();
+    let raw: String = conn
+        .query_row(
+            "SELECT chromix_options FROM profiles WHERE id = 'p'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(raw, "{}");
+
+    for invalid in ["null", "false", "42", "\"text\"", "[]", "not-json"] {
+        assert!(
+            conn.execute(
+                "UPDATE profiles SET chromix_options = ? WHERE id = 'p'",
+                [invalid],
+            )
+            .is_err(),
+            "{invalid}"
+        );
+    }
+    assert!(conn
+        .execute(
+            "UPDATE profiles SET chromix_options = NULL WHERE id = 'p'",
+            [],
+        )
+        .is_err());
+    let expected =
+        r#"{"unknown":{"disabled":false,"nullable":null,"seed":"18446744073709551615"}}"#;
+    conn.execute(
+        "UPDATE profiles SET chromix_options = ? WHERE id = 'p'",
+        [expected],
+    )
+    .unwrap();
+    run_migrations(&conn).unwrap();
+    let raw: String = conn
+        .query_row(
+            "SELECT chromix_options FROM profiles WHERE id = 'p'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(raw, expected);
 }

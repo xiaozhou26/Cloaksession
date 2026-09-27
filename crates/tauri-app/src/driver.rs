@@ -51,7 +51,7 @@ use async_trait::async_trait;
 use cdp_driver::session::BrowserSession;
 use mcp_server::driver::BrowserDriver;
 use multizen_core::{
-    BrowserEngine, CreateProfileInput, LaunchedProfile, MultizenError, Profile, ProfileSummary,
+    BrowserEngine, ChromixSettings, CreateProfileInput, LaunchedProfile, MultizenError, Profile, ProfileSummary,
     Result, UpdateProfileInput,
 };
 use serde::Serialize;
@@ -113,6 +113,9 @@ enum LauncherCmd {
         binary: PathBuf,
         engine: BrowserEngine,
         companion: Option<PathBuf>,
+        chromix: ChromixSettings,
+        chromix_runtime: PathBuf,
+        skip_download: bool,
         resp: oneshot::Sender<Result<LaunchedProfile>>,
     },
     Close {
@@ -179,6 +182,9 @@ pub struct TauriBrowserDriver {
     engine: BrowserEngine,
     browser_binary: PathBuf,
     companion_dir: Option<PathBuf>,
+    chromix: ChromixSettings,
+    chromix_runtime: PathBuf,
+    skip_download: bool,
     /// Shared extensions directory (`<data_dir>/extensions/`). Each
     /// extension is unpacked into `<extensions_root>/<ext_id>/` and
     /// referenced by `ExtensionConfig.dir` across profiles.
@@ -225,11 +231,26 @@ impl TauriBrowserDriver {
             engine,
             browser_binary,
             companion_dir,
+            chromix: ChromixSettings::default(),
+            chromix_runtime: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/chromix"),
+            skip_download: false,
             extensions_root,
             profiles_root,
             running: StdMutex::new(HashSet::new()),
             app: StdMutex::new(None),
         })
+    }
+
+    pub fn with_chromix(
+        mut self,
+        settings: ChromixSettings,
+        runtime_dir: PathBuf,
+        skip_download: bool,
+    ) -> Self {
+        self.chromix = settings;
+        self.chromix_runtime = runtime_dir;
+        self.skip_download = skip_download;
+        self
     }
 
     /// Get the shared extensions directory.
@@ -330,11 +351,32 @@ async fn launcher_task(
                 binary,
                 engine,
                 companion,
+                chromix,
+                chromix_runtime,
+                skip_download,
                 resp,
             } => {
-                let result = launcher
-                    .launch(&profile_id, &binary, engine, companion.as_deref())
-                    .await;
+                let result = if engine == BrowserEngine::Chromix {
+                    async {
+                        let profile = pm.get(&profile_id)?
+                            .ok_or_else(|| MultizenError::NotFound(profile_id.clone()))?;
+                        let config = chromix.with_profile_options(&profile.chromix_options);
+                        launcher
+                            .launch_with_chromix(
+                                &profile_id,
+                                &binary,
+                                companion.as_deref(),
+                                &config,
+                                &chromix_runtime,
+                                skip_download,
+                            )
+                            .await
+                    }.await
+                } else {
+                    launcher
+                        .launch(&profile_id, &binary, engine, companion.as_deref())
+                        .await
+                };
                 let _ = resp.send(result);
             }
             LauncherCmd::Close { profile_id, resp } => {
@@ -405,6 +447,9 @@ impl BrowserDriver for TauriBrowserDriver {
                 binary: self.browser_binary.clone(),
                 engine: self.engine,
                 companion: self.companion_dir.clone(),
+                chromix: self.chromix.clone(),
+                chromix_runtime: self.chromix_runtime.clone(),
+                skip_download: self.skip_download,
                 resp: resp_tx,
             })
             .await
@@ -452,13 +497,7 @@ impl BrowserDriver for TauriBrowserDriver {
             }
         };
 
-        // Connect a BrowserSession to the freshly-launched CDP endpoint and
-        // register it. If the connect fails the process is left running; the
-        // caller can retry `launch` (idempotent on the launcher side) or
-        // `close` to clean up. We do NOT roll back the launch here because the
-        // launcher may have already marked the profile opened and stored the
-        // handle — propagating the connect error keeps the system state
-        // inspectable.
+        // Chromix owns a persistent SDK context; close it if the CDP attach fails.
         let session = match self
             .registry
             .get_or_connect(profile_id, &launched.cdp_endpoint, self.engine)
@@ -466,6 +505,15 @@ impl BrowserDriver for TauriBrowserDriver {
         {
             Ok(session) => session,
             Err(e) => {
+                if self.engine == BrowserEngine::Chromix {
+                    let (resp, receive) = oneshot::channel();
+                    if self.launcher_tx.send(LauncherCmd::Close {
+                        profile_id: profile_id.to_string(), resp,
+                    }).await.is_ok() {
+                        let _ = receive.await;
+                    }
+                    self.running.lock().unwrap().remove(profile_id);
+                }
                 self.emit(
                     "chromium:status",
                     &ChromiumStatus {

@@ -1,4 +1,5 @@
 pub mod args;
+mod chromix;
 pub mod driver;
 pub mod proxy_geo;
 pub mod registry;

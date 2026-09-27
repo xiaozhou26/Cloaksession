@@ -1,0 +1,19 @@
+{
+  "name": "cloaksession-chromix-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@xiaoxiaofeihh/chromix": "0.1.0",
+    "playwright-core": "1.63.0"
+  },
+  "devDependencies": {
+    "yauzl": "3.4.0"
+  }
+}

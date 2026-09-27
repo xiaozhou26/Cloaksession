@@ -128,6 +128,13 @@ pub fn build_spawn_args(
     geo_coords: Option<(f64, f64)>,
     companion_dir: Option<&str>,
 ) -> Vec<String> {
+    if engine == BrowserEngine::Chromix {
+        return vec![
+            format!("--user-data-dir={browser_data_dir}"),
+            "--remote-debugging-address=127.0.0.1".into(),
+            format!("--remote-debugging-port={port}"),
+        ];
+    }
     let fp = &profile.fingerprint;
     let mut args = vec![
         format!("--user-data-dir={browser_data_dir}"),
@@ -162,6 +169,7 @@ pub fn build_spawn_args(
             args.push(format!("--user-agent={}", fp.user_agent));
             args.push("--test-type=gpu".to_string());
         }
+        BrowserEngine::Chromix => unreachable!("Chromix uses the SDK bridge"),
     }
 
     if let Some(url) = proxy_bridge_url {
