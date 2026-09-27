@@ -81,7 +81,7 @@ export async function installTauriMock(page: Page, initial: AppSettings = defaul
               localStorage.setItem(key, JSON.stringify(next));
               return next;
             }
-            case "system_info": return { mcpHttpUrl: "http://127.0.0.1:7777", mcpAuthToken: "fixture-token-not-secret", appVersion: "1.1.1", platform: "darwin" };
+            case "system_info": return { mcpHttpUrl: "http://127.0.0.1:7777", mcpAuthToken: "fixture-token-not-secret", appVersion: "1.2.0", platform: "darwin" };
             case "profiles_list": {
               const current = mock.profile();
               return [{ id: current.id, name: current.name, tags: current.tags, isRunning: false, timezone: current.fingerprint.timezone }];

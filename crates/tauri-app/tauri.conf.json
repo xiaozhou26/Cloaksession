@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Cloaksession",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "identifier": "com.cloaksession.browser",
   "build": {
     "beforeDevCommand": {"script": "npm --prefix ../resources/chromix ci --omit=dev && npm run dev", "cwd": "ui"},
