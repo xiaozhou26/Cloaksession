@@ -48,7 +48,7 @@
 
 新增 Node 可执行文件解析后，保持 `nodePath: node` 和精简 PATH，实际有窗口的 Chromix 在 Wails 中启动/停止通过。`CLOAKSESSION_TEST_CHROMIX` 控制的 `TestChromixDesktopLaunch` 对 random/fixed/custom 分别执行有窗口启动、输入、点击、CDP 版本查询和关闭，全部通过。完整 Go race/vet 及以真实 Chromix 替换普通 Chrome 的浏览器测试通过。
 
-这些测试验证启动和操作链路，不把启动成功等同于全部自定义指纹参数生效；此内核的独立 smoke 中硬件与 quota 观测值未逐项等于请求值。Node 路径修复纳入 v1.4.2；v1.4.1 附件不包含它。发布状态以 v1.4.2 的 GitHub Actions 结果为准。
+这些测试验证启动和操作链路，不把启动成功等同于全部自定义指纹参数生效；此内核的独立 smoke 中硬件与 quota 观测值未逐项等于请求值。Node 路径修复纳入 v1.4.3；v1.4.1 附件不包含它。v1.4.2 在 Windows 的跨平台 tilde 路径测试中被拦截，v1.4.3 保留原始配置路径的显式路径判断。发布状态以 v1.4.3 的 GitHub Actions 结果为准。
 
 ## 必须完成的目标机器验收
 

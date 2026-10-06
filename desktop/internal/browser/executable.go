@@ -56,7 +56,7 @@ func resolveNodeExecutableWith(configured string, env []string, goos, home strin
 		}
 		path = filepath.Join(home, strings.TrimLeft(path[1:], `/\`))
 	}
-	explicit := filepath.IsAbs(path) || strings.ContainsRune(path, '/') || goos == "windows" && strings.ContainsAny(path, `\:`)
+	explicit := filepath.IsAbs(path) || strings.ContainsRune(configured, '/') || goos == "windows" && strings.ContainsAny(configured, `\:`)
 	if explicit || configured == "~" {
 		resolved, err := check(path)
 		if err != nil {

@@ -311,7 +311,7 @@ test("StrictMode and shared view navigation do not leak Wails listeners", async 
   }
   for (let i = 0; i < 3; i++) {
     await page.getByTitle("Settings · ⌘,", { exact: true }).click();
-    await expect(page.getByText("Cloaksession v1.4.2 · macos · Wails v2", { exact: true })).toBeVisible();
+    await expect(page.getByText("Cloaksession v1.4.3 · macos · Wails v2", { exact: true })).toBeVisible();
     await expect.poll(() => count("update:status")).toBe(2);
     await page.getByTitle("Profiles · ⌘1", { exact: true }).click();
     await expect.poll(() => count("update:status")).toBe(1);
@@ -382,7 +382,7 @@ for (const command of ["settings_get", "system_info", "update_status", "update_l
     await expect(page.getByRole("region", { name: "Settings", exact: true })).toBeVisible();
     await expect(page.getByRole("alert").filter({ hasText: "Could not load settings:" })).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => (window as any).__WAILS_MOCK__.listenerCount("update:status"))).toBe(2);
-    await expect(page.getByText("Cloaksession v1.4.2 · macos · Wails v2", { exact: true })).toBeVisible();
+    await expect(page.getByText("Cloaksession v1.4.3 · macos · Wails v2", { exact: true })).toBeVisible();
   });
 }
 
