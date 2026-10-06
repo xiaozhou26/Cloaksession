@@ -48,6 +48,11 @@ export function App(): JSX.Element {
   const closingTimers = useRef<Map<string, number>>(new Map());
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [info, setInfo] = useState<SystemInfo | null>(null);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const [startupAttempt, setStartupAttempt] = useState(0);
+  const reportStartupError = useCallback((error: unknown) => {
+    setStartupError(error instanceof Error ? error.message : String(error));
+  }, []);
   // Whether the Chromium runtime is ready — used to suppress the update banner
   // while the blocking first-run bootstrap modal is up, so they don't compete.
   const [chromiumReady, setChromiumReady] = useState(false);
@@ -56,16 +61,16 @@ export function App(): JSX.Element {
     let active = true;
     const apply = (s: ChromiumStatus): void =>
       setChromiumReady(s.kind === "ready" || s.kind === "dev-system");
-    void chromium.status().then(apply);
+    void chromium.status().then(apply).catch(reportStartupError);
     void onChromiumStatus(apply).then((fn) => {
       if (active) unlisten = fn;
       else fn();
-    });
+    }).catch(reportStartupError);
     return () => {
       active = false;
       unlisten();
     };
-  }, []);
+  }, [reportStartupError, startupAttempt]);
   // Global toast when the companion "Add to Cloaksession" button installs an
   // extension into a running profile (the edit sheet may not be open).
   useEffect(() => {
@@ -80,12 +85,12 @@ export function App(): JSX.Element {
     }).then((fn) => {
       if (active) unlisten = fn;
       else fn();
-    });
+    }).catch(reportStartupError);
     return () => {
       active = false;
       unlisten();
     };
-  }, []);
+  }, [reportStartupError, startupAttempt]);
   // Last-interacted profile id — only used by the command palette's
   // "Export" action, which exports whichever profile the user most
   // recently opened in the edit modal.
@@ -107,15 +112,19 @@ export function App(): JSX.Element {
   const [toast, setToast] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const list = await profilesApi.list();
-    setProfiles(list);
-  }, []);
+    try {
+      const list = await profilesApi.list();
+      setProfiles(list);
+    } catch (error) {
+      reportStartupError(error);
+    }
+  }, [reportStartupError]);
 
   // Initial load + activity stream subscription
   useEffect(() => {
     void refresh();
-    void system.info().then(setInfo);
-    void activity.recent().then(setEvents);
+    void system.info().then(setInfo).catch(reportStartupError);
+    void activity.recent().then(setEvents).catch(reportStartupError);
 
     let offEvents = (): void => {};
     let offRunning = (): void => {};
@@ -144,7 +153,7 @@ export function App(): JSX.Element {
     }).then((fn) => {
       if (active) offEvents = fn;
       else fn();
-    });
+    }).catch(reportStartupError);
 
     // Refetch on ANY running-state change, including the "user closed
     // Chromium window directly" case which doesn't go through MCP at all.
@@ -187,7 +196,7 @@ export function App(): JSX.Element {
     }).then((fn) => {
       if (active) offRunning = fn;
       else fn();
-    });
+    }).catch(reportStartupError);
 
     // Background proxy-country backfill emits this as each probe lands —
     // refresh so the flag chip updates without the user touching anything.
@@ -196,7 +205,7 @@ export function App(): JSX.Element {
     }).then((fn) => {
       if (active) offProxyCountry = fn;
       else fn();
-    });
+    }).catch(reportStartupError);
 
     return () => {
       active = false;
@@ -206,7 +215,7 @@ export function App(): JSX.Element {
       closingTimers.current.forEach((t) => window.clearTimeout(t));
       closingTimers.current.clear();
     };
-  }, [refresh]);
+  }, [refresh, reportStartupError, startupAttempt]);
 
   // Keyboard shortcuts: ⌘K palette, ⌘N new profile, ⌘1/2/, sections,
   // ⌘⇧A drawer, esc closes overlays.
@@ -349,7 +358,7 @@ export function App(): JSX.Element {
 
   const runningCount = profiles.filter((p) => p.isRunning).length;
 
-  if (showOnboarding && true) {
+  if (showOnboarding && !startupError) {
     return <FirstRun onCreate={onboardCreate} />;
   }
 
@@ -358,10 +367,20 @@ export function App(): JSX.Element {
       <TopBar
         totalCount={profiles.length}
         runningCount={runningCount}
-        mcpUrl={info?.mcpHttpUrl ?? null}
+        mcpUrl={info?.mcpError ? null : info?.mcpHttpUrl || null}
         onCmdK={() => setPaletteOpen(true)}
         onSettings={() => setSection("settings")}
       />
+
+      {startupError && (
+        <div role="alert" className="shrink-0 break-words bg-red-950/40 px-4 py-3 text-[12px] text-red-200">
+          <p>Could not initialize Cloaksession: {startupError}</p>
+          <button type="button" className="btn-secondary mt-2 rounded-lg px-3 py-1.5" onClick={() => {
+            setStartupError(null);
+            setStartupAttempt((attempt) => attempt + 1);
+          }}>Retry connection</button>
+        </div>
+      )}
 
       <UpdateBanner suppressed={!chromiumReady} />
 
@@ -369,14 +388,7 @@ export function App(): JSX.Element {
         <LeftRail active={section} onChange={setSection} onCmdK={() => setPaletteOpen(true)} />
 
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          {false && (
-            <div
-              className="m-6 px-4 py-3 rounded-lg text-sm text-red-300"
-              style={{ background: "rgba(239,68,68,0.06)", boxShadow: "inset 0 0 0 1px rgba(239,68,68,0.25)" }}
-            >
-              Preload bridge missing — <code>window.multizen</code> is undefined. Open DevTools for details.
-            </div>
-          )}
+
 
           {section === "profiles" && (
             <>
@@ -437,8 +449,10 @@ export function App(): JSX.Element {
             <McpPanel
               events={events}
               profiles={profiles}
-              mcpUrl={info?.mcpHttpUrl ?? null}
+              mcpUrl={info?.mcpError ? null : info?.mcpHttpUrl || null}
               mcpToken={info?.mcpAuthToken ?? null}
+              mcpError={info?.mcpError}
+              onSettings={() => setSection("settings")}
             />
           )}
 

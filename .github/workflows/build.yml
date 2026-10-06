@@ -26,15 +26,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: |
             desktop/frontend/package-lock.json
-            crates/desktop-core/resources/chromix/package-lock.json
+            desktop/resources/playwright/package-lock.json
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.12'
@@ -49,14 +47,12 @@ jobs:
         working-directory: desktop/frontend
         run: npm ci --legacy-peer-deps
       - name: Install direct Playwright bridge dependencies
-        working-directory: crates/desktop-core/resources/chromix
+        working-directory: desktop/resources/playwright
         run: npm ci
       - name: Test build and packaging helpers
         run: python -m unittest discover -s scripts -p 'test_*.py'
-      - name: Test Rust workspace
-        run: cargo test --workspace --locked
-      - name: Test Chromix browser bridge
-        working-directory: crates/desktop-core/resources/chromix
+      - name: Test direct Playwright browser bridge
+        working-directory: desktop/resources/playwright
         run: npm test
       - name: Test frontend fingerprint catalog
         working-directory: desktop/frontend
@@ -64,19 +60,18 @@ jobs:
       - name: Build frontend
         working-directory: desktop/frontend
         run: npm run build
-      - name: Build Rust sidecar for Go integration
-        run: cargo build --locked -p desktop-core
-      - name: Test Go desktop and real Rust sidecar with race detector
+      - name: Test Go backend with race detector
         working-directory: desktop
-        env:
-          CLOAKSESSION_TEST_CORE: ${{ github.workspace }}/target/debug/desktop-core
-          CLOAKSESSION_RESOURCE_DIR: ${{ github.workspace }}/crates/desktop-core/resources
-        run: |
-          test -x "$CLOAKSESSION_TEST_CORE"
-          go test -race -count=1 -mod=readonly -v ./...
+        run: go test -race -count=1 -mod=readonly -v ./...
       - name: Install Chrome for browser tests
         working-directory: desktop/frontend
         run: npx playwright install --with-deps chrome
+      - name: Test real Go browser lifecycle in Chrome
+        working-directory: desktop
+        run: |
+          export CLOAKSESSION_TEST_BROWSER="$(command -v google-chrome)"
+          test -x "$CLOAKSESSION_TEST_BROWSER"
+          go test -race -count=1 -mod=readonly -v -run '^TestServiceRealBrowser$' .
       - name: Test frontend in Chromium
         working-directory: desktop/frontend
         run: npx playwright test --config playwright.config.ts
@@ -102,17 +97,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.platform }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: |
             desktop/frontend/package-lock.json
-            crates/desktop-core/resources/chromix/package-lock.json
+            desktop/resources/playwright/package-lock.json
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.12'
@@ -131,8 +122,6 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: python scripts/build.py --check-version --tag "$RELEASE_TAG"
         shell: bash
-      - name: Test backend on target platform
-        run: cargo test --workspace --locked
       - name: Build Wails application and stage complete runtime
         if: ${{ !inputs.package }}
         run: python scripts/build.py ${{ matrix.args }}
@@ -141,7 +130,7 @@ jobs:
         run: python scripts/build.py --package ${{ matrix.args }}
       - name: Test Go desktop on target platform
         working-directory: desktop
-        run: go test -mod=readonly ./...
+        run: go test -count=1 -mod=readonly ./...
       - name: Upload release package
         if: inputs.package
         uses: actions/upload-artifact@v4

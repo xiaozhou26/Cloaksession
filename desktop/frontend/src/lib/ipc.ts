@@ -1,4 +1,4 @@
-/** Public IPC API backed by Wails v2; command names and Rust payloads stay unchanged. */
+/** Public IPC API backed by Wails v2; command names and compatible JSON payloads stay unchanged. */
 import { invoke, listen, type UnlistenFn } from "./wails";
 
 import type {
@@ -46,10 +46,10 @@ function noopUnlisten(): Promise<() => void> {
 // ---------------------------------------------------------------------------
 
 export const profiles = {
-  /** `profiles_list` → `Vec<ProfileSummary>`. */
+  /** `profiles_list` → `ProfileSummary[]`. */
   list: (): Promise<ProfileSummary[]> => invoke<ProfileSummary[]>("profiles_list"),
 
-  /** `profiles_get` → `Option<Profile>`. */
+  /** `profiles_get` → `Profile | null`. */
   get: (id: ProfileId): Promise<Profile | null> =>
     invoke<Profile | null>("profiles_get", { id }),
 
@@ -112,7 +112,7 @@ export const settings = {
   /**
    * `settings_update` → `AppSettings` (full settings returned).
    * Accepts a partial patch (renderer passes `Partial<AppSettings>`);
-   * the Rust side merges with existing settings.
+   * the Go service merges with existing settings.
    */
   update: (patch: Partial<AppSettings>): Promise<AppSettings> =>
     invoke<AppSettings>("settings_update", { patch }),
@@ -123,11 +123,11 @@ export const settings = {
 // ---------------------------------------------------------------------------
 
 export const dialog = {
-  /** `dialog_pick_browser_binary` → `Option<PathBuf>` (string | null). */
+  /** `dialog_pick_browser_binary` → `string | null`. */
   pickBrowserBinary: (): Promise<string | null> =>
     invoke<string | null>("dialog_pick_browser_binary"),
 
-  /** `dialog_pick_directory` → `Option<PathBuf>` (string | null). */
+  /** `dialog_pick_directory` → `string | null`. */
   pickDirectory: (): Promise<string | null> =>
     invoke<string | null>("dialog_pick_directory"),
 };
@@ -137,7 +137,7 @@ export const dialog = {
 // ---------------------------------------------------------------------------
 
 export const activity = {
-  /** `activity_recent` → `Vec<ActivityEvent>`. `limit` defaults to 100 (capped 500). */
+  /** `activity_recent` → `ActivityEvent[]`. `limit` defaults to 100 (capped 500). */
   recent: (limit?: number): Promise<ActivityEvent[]> =>
     invoke<ActivityEvent[]>("activity_recent", { limit: limit ?? null }),
 };
@@ -155,25 +155,25 @@ export const system = {
 // Fingerprint
 // ---------------------------------------------------------------------------
 //
-// An empty seed requests a random fingerprint from the Rust core.
+// An empty seed requests a random fingerprint from the Go service.
 
 export const fingerprint = {
   /**
    * `fingerprint_generate` → `FingerprintConfig`.
-   * Renderer calls with no args; we pass an empty seed (Rust generates
+   * Renderer calls with no args; we pass an empty seed (the backend generates
    * random fingerprint for empty seed).
    */
   generate: (): Promise<FingerprintConfig> =>
     invoke<FingerprintConfig>("fingerprint_generate", { seed: "" }),
 
   /**
-   * `fingerprint_devices` → `Vec<DeviceCatalogEntry>`.
+   * `fingerprint_devices` → `DeviceCatalogEntry[]`.
    */
   devices: (): Promise<DeviceCatalogEntry[]> =>
     invoke<DeviceCatalogEntry[]>("fingerprint_devices"),
 
   /**
-   * `fingerprint_locales` → `Vec<LocaleCatalogEntry>`.
+   * `fingerprint_locales` → `LocaleCatalogEntry[]`.
    */
   locales: (): Promise<LocaleCatalogEntry[]> =>
     invoke<LocaleCatalogEntry[]>("fingerprint_locales"),
@@ -211,13 +211,8 @@ export const fingerprint = {
 
 export const proxy = {
   /**
-   /**
-   * `proxy_detect_geo` → `ProxyGeoResult`. Probes the exit IP / geo of the
-   * proxy via ipapi.co (12s timeout). Runs in the Rust core using
-   * the P2.7 `browser-launcher::proxy_geo::probe_proxy_geo` helper — no
-   * launcher-thread routing needed. `profileId` is accepted for future
-   * "persist resolved country onto the profile" wiring but not yet used
-   * by the backend.
+   * `proxy_detect_geo` → `ProxyGeoResult`. Probes the proxy exit IP and region.
+   * The optional profile ID remains reserved for compatibility.
    */
   detectGeo: (
     proxy: ProxyConfig,
@@ -301,7 +296,7 @@ export const update = {
 };
 
 // ---------------------------------------------------------------------------
-// Push events retain the Rust payload; Wails passes it directly to callbacks.
+// Push events retain the Go payload; Wails passes it directly to callbacks.
 // ---------------------------------------------------------------------------
 
 /**
@@ -317,7 +312,7 @@ export function onRunningChanged(
 /**
  * `chromium:status` push event.
  *
- * The Rust core emits a flat `{ profileId, status, error }` payload,
+ * The Go service emits a flat `{ profileId, status, error }` payload,
  * but the renderer expects the legacy discriminated-union `ChromiumStatus`.
  * Keep this listener a no-op so the
  * renderer's `status.kind` accesses don't crash; the initial

@@ -265,7 +265,7 @@ export function FingerprintForm({ fingerprint, onChange, proxy }: Props): JSX.El
       {/* Direct editors for every persisted value that is not derived by the
           device/locale reconciliation controls above. Keeping these values in
           the same object is important: create and edit both round-trip the
-          authoritative Rust FingerprintConfig without shadow state. */}
+          authoritative FingerprintConfig without shadow state. */}
       <Field label="User-Agent">
         <input
           type="text"

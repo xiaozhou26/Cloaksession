@@ -41,6 +41,8 @@ export interface MockOptions {
   section?: "profiles" | "settings" | "mcp";
   onboarded?: boolean;
   empty?: boolean;
+  startupFailures?: Record<string, string>;
+  mcpError?: string;
 }
 
 export async function installWailsMock(
@@ -64,6 +66,7 @@ export async function installWailsMock(
       calls: [] as string[],
       invocations: [] as { command: string; args: Record<string, any> }[],
       failures: {} as Record<string, string>,
+      startupFailures: { ...options.startupFailures },
       failNextSave: false,
       unsubscriptions: 0,
       settings: () => JSON.parse(localStorage.getItem(key)!),
@@ -73,6 +76,7 @@ export async function installWailsMock(
       },
       listenerCount: (name: string) => listeners.get(name)?.size ?? 0,
     };
+    const runtimeSettings = mock.settings();
     Object.assign(window, {
       __WAILS_MOCK__: mock,
       runtime: {
@@ -90,6 +94,7 @@ export async function installWailsMock(
         Invoke: async (command: string, args: Record<string, any>) => {
           mock.calls.push(command);
           mock.invocations.push({ command, args: JSON.parse(JSON.stringify(args)) });
+          if (mock.startupFailures[command]) throw mock.startupFailures[command];
           if (mock.failures[command]) {
             const message = mock.failures[command];
             delete mock.failures[command];
@@ -109,7 +114,7 @@ export async function installWailsMock(
               localStorage.setItem(key, JSON.stringify(next));
               return next;
             }
-            case "system_info": return { mcpHttpUrl: mock.settings().mcpHttpEnabled ? "http://127.0.0.1:7777" : null, mcpAuthToken: "fixture-token-not-secret", appVersion: "1.3.0", platform: "macos" };
+            case "system_info": return { mcpHttpUrl: runtimeSettings.mcpHttpEnabled && !options.mcpError ? `http://127.0.0.1:${runtimeSettings.mcpHttpPort}` : "", mcpError: options.mcpError, mcpAuthToken: "fixture-token-not-secret", appVersion: "1.4.0", platform: "macos" };
             case "profiles_list": return mock.profiles().map((current) => ({ ...current, isRunning: running.has(current.id), timezone: current.fingerprint.timezone }));
             case "profiles_get": return mock.profiles().find((current) => current.id === args.id) ?? null;
             case "profiles_create": {

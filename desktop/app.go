@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,10 +11,10 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// App owns the browser core for the lifetime of the desktop window.
+// App exposes the Go service directly to the Wails frontend.
 type App struct {
 	ctx      context.Context
-	core     *coreClient
+	service  *Service
 	startErr error
 	started  chan struct{}
 	dialogMu sync.Mutex
@@ -25,72 +24,52 @@ func newApp() *App { return &App{started: make(chan struct{})} }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	binary, resources, err := corePaths()
-	if err != nil {
-		a.startErr = err
-		close(a.started)
-		return
-	}
+	defer close(a.started)
 	data, err := dataDirectory()
 	if err != nil {
 		a.startErr = err
-		close(a.started)
 		return
 	}
-	a.core, a.startErr = startCore(binary, data, resources, func(event string, data json.RawMessage) {
-		var payload any
-		if err := json.Unmarshal(data, &payload); err != nil {
-			wailsruntime.LogError(ctx, fmt.Sprintf("decode %s event: %v", event, err))
-			return
-		}
-		wailsruntime.EventsEmit(ctx, event, payload)
-	}, a.dialog)
-	if a.startErr != nil {
-		close(a.started)
+	resources, err := resourceDirectory()
+	if err != nil {
+		a.startErr = err
 		return
 	}
-	go a.awaitCore()
-}
-
-func (a *App) awaitCore() {
-	a.startErr = a.core.waitReady()
-	close(a.started)
-	if a.startErr != nil {
-		a.core.close()
-	}
+	a.service, a.startErr = newService(data, resources, a.dialog, func(event string, data any) { wailsruntime.EventsEmit(ctx, event, data) }, func(url string) error { wailsruntime.BrowserOpenURL(ctx, url); return nil })
 }
 
 func (a *App) domReady(ctx context.Context) {
 	<-a.started
 	if a.startErr != nil {
-		_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
-			Type:    wailsruntime.ErrorDialog,
-			Title:   "Cloaksession could not start",
-			Message: a.startErr.Error(),
-		})
-		return
+		_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{Type: wailsruntime.ErrorDialog, Title: "Cloaksession could not start", Message: a.startErr.Error()})
 	}
 }
 
 func (a *App) shutdown(context.Context) {
 	<-a.started
-	if a.core != nil {
-		a.core.close()
+	if a.service != nil {
+		a.service.Close()
 	}
 }
 
-// Invoke forwards the existing typed frontend commands to the Rust core.
-func (a *App) Invoke(command string, args map[string]any) (json.RawMessage, error) {
+func (a *App) Invoke(command string, args map[string]any) (any, error) {
 	<-a.started
 	if a.startErr != nil {
 		return nil, a.startErr
 	}
-	return a.core.invoke(command, args)
+	return a.service.Invoke(a.ctx, command, args)
 }
 
 func (a *App) dialog(request dialogRequest) (string, error) {
 	a.dialogMu.Lock()
 	defer a.dialogMu.Unlock()
+	if a.service != nil {
+		select {
+		case <-a.service.ctx.Done():
+			return "", a.service.ctx.Err()
+		default:
+		}
+	}
 	filters := make([]wailsruntime.FileFilter, 0, len(request.Filters))
 	for _, filter := range request.Filters {
 		filters = append(filters, wailsruntime.FileFilter{DisplayName: filter.DisplayName, Pattern: filter.Pattern})
@@ -138,43 +117,25 @@ func dataDirectory() (string, error) {
 	return path, os.MkdirAll(path, 0700)
 }
 
-func corePaths() (string, string, error) {
+func resourceDirectory() (string, error) {
+	if override := os.Getenv("CLOAKSESSION_RESOURCE_DIR"); override != "" {
+		return override, nil
+	}
 	executable, err := os.Executable()
 	if err != nil {
-		return "", "", err
-	}
-	name := "desktop-core"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
+		return "", err
 	}
 	dir := filepath.Dir(executable)
-	binary := os.Getenv("CLOAKSESSION_CORE_BINARY")
-	resources := os.Getenv("CLOAKSESSION_RESOURCE_DIR")
-	if binary == "" {
-		binary = filepath.Join(dir, name)
-		if _, err := os.Stat(binary); err != nil {
-			// Wails dev runs from the desktop directory or build/bin.
-			cwd, _ := os.Getwd()
-			for _, root := range []string{cwd, filepath.Join(cwd, ".."), filepath.Join(dir, "..", "..", "..")} {
-				candidate := filepath.Join(root, "target", "release", name)
-				if _, err := os.Stat(candidate); err == nil {
-					binary = candidate
-					if resources == "" {
-						resources = filepath.Join(root, "crates", "desktop-core", "resources")
-					}
-					break
-				}
-			}
+	candidates := []string{filepath.Join(dir, "resources")}
+	if runtime.GOOS == "darwin" {
+		candidates = append([]string{filepath.Join(dir, "..", "Resources")}, candidates...)
+	}
+	cwd, _ := os.Getwd()
+	candidates = append(candidates, filepath.Join(cwd, "resources"), filepath.Join(cwd, "desktop", "resources"), filepath.Join(dir, "..", "..", "resources"))
+	for _, candidate := range candidates {
+		if _, err := os.Stat(filepath.Join(candidate, "playwright", "bridge.mjs")); err == nil {
+			return candidate, nil
 		}
 	}
-	if resources == "" {
-		resources = filepath.Join(dir, "resources")
-		if runtime.GOOS == "darwin" {
-			resources = filepath.Join(dir, "..", "Resources")
-		}
-	}
-	if _, err := os.Stat(binary); err != nil {
-		return "", "", fmt.Errorf("browser core unavailable at %s: build with scripts/build.py first: %w", binary, err)
-	}
-	return binary, resources, nil
+	return "", fmt.Errorf("Playwright runtime resources are missing; build with scripts/build.py")
 }

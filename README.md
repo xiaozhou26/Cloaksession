@@ -1,13 +1,15 @@
 # Cloaksession
 
-Cloaksession 是一个基于 **Wails v2（Go）+ Rust + React** 的桌面浏览器环境管理工具。它为每个 Profile 管理独立的浏览器用户数据目录、代理和指纹配置，支持手动使用，也通过本地 **MCP（Model Context Protocol）** 接口供 AI 客户端操作浏览器。
+Cloaksession 是一个基于 **Wails v2（Go）+ React** 的桌面浏览器环境管理工具。它为每个 Profile 管理独立的浏览器用户数据目录、代理和指纹配置，支持手动使用，也通过本地 **MCP（Model Context Protocol）** 接口供 AI 客户端操作浏览器。
 
 本仓库提供管理应用及浏览器启动、Chrome DevTools Protocol（CDP，浏览器调试协议）控制逻辑，**不包含浏览器内核**。当前默认引擎为 CloakBrowser，另有 Chrome for Testing（CFT）兼容路径，并可通过 Node / Playwright bridge 启动本地 Chromix。以下以 Windows 为主要使用和开发环境；发布工作流包含其他平台，但不代表所有功能已经过跨平台验证。
 
 - 源码：[xiaozhou26/Cloaksession](https://github.com/xiaozhou26/Cloaksession)
 - 下载：[GitHub Releases](https://github.com/xiaozhou26/Cloaksession/releases)（以实际发布附件为准）
 
-## 已实现的功能
+## 功能范围与迁移状态
+
+**1.4.0 正在迁移为全 Go 后端**：Wails 主程序直接提供存储、浏览器、MCP、扩展和归档服务，不再启动 Rust 核心进程。下列是保留的功能范围；纯 Go 实现及最终安装包的通过情况以 [验收记录](docs/ACCEPTANCE.md) 为准，旧版验证不能替代本次回归。
 
 - **Profile 管理**：创建、编辑、删除、启动和关闭环境，保存名称、标签、备注、图标、启动页等配置，并为浏览器设置会话恢复。
 - **指纹配置**：设备预设、User-Agent、Client Hints、语言、时区、屏幕、DPR、CPU 核数、内存、WebGL、字体目录、存储配额和种子；具体生效范围取决于引擎。
@@ -36,14 +38,14 @@ Cloaksession 是一个基于 **Wails v2（Go）+ Rust + React** 的桌面浏览�
 4. 全局 options 叠加 Profile options；Profile 的数组/嵌套对象按选项整体覆盖。bridge 合并顶层、`launchOptions`、`contextOptions`，原始 `args` 用于传递浏览器支持的 flags，并保留 host 管理的用户目录、扩展和 loopback CDP。
 5. 旧 SDK 专有选项（如 `devicePool`、`humanize`、`geoip`、`browserVersion`、`releaseChannel` 等）不再由 bridge 实现，会明确报错，需移除或改为实际 Playwright 选项/浏览器参数；不会伪装成成功。
 
-运行资源位于 `crates/desktop-core/resources/chromix/`，使用锁定的 `playwright-core`，不再捆绑 Chromix Node SDK/vendor。构建会执行 `npm ci`；运行需要外部 Node.js 20+ 和本地浏览器。固定/自定义 seed 必须是 `1` 至 `18446744073709551615` 的十进制字符串，不能用 JavaScript Number 保存；random 在每次启动时重新生成，不复用旧 seed。Fixed 的可复现性需保持相同内核和其他配置，seed 不构成匿名或唯一设备保证。
+运行资源位于 `desktop/resources/playwright/`，使用锁定的 `playwright-core`，不再捆绑 Chromix Node SDK/vendor。构建会执行 `npm ci`；运行需要外部 Node.js 20+ 和本地浏览器。固定/自定义 seed 必须是 `1` 至 `18446744073709551615` 的十进制字符串，不能用 JavaScript Number 保存；random 在每次启动时重新生成，不复用旧 seed。Fixed 的可复现性需保持相同内核和其他配置，seed 不构成匿名或唯一设备保证。
 
 注意以下边界：
 
 - 三种引擎都需要本地浏览器；Chromix bridge 仅使用已有可执行文件，`playwright-core` 不会自动下载内核。
 - 指纹字段可以保存，并不表示所有字段在每个内核、页面和平台都能一致生效。设备预设只是配置，不等于虚拟机或真实硬件仿真。
 - CDP 自动化、页面脚本覆盖和代理启动参数都不构成不可检测、匿名或防泄漏保证。请在实际浏览器版本和网络环境中自行验证。
-- CDP 驱动的 `safe_cdp` 检查尚未拦截 chromiumoxide 的自动域启用；不能将其视为完整的保护层，某些 CloakBrowser 构建可能存在兼容性或崩溃风险。
+- Go CDP 驱动和真实浏览器的域启用、指纹生效及进程清理需要重新回归；不能沿用旧版驱动的兼容性结论。
 - 默认配置含 Windows 设备信息和 `C:\Windows\Fonts` 字体路径，其他平台需要自行调整；CFT 路径也不能视为与 CloakBrowser 功能等价。
 
 ### 存储配额单位
@@ -52,7 +54,7 @@ Cloaksession 是一个基于 **Wails v2（Go）+ Rust + React** 的桌面浏览�
 
 默认值为 `2_000_000_000` 字节（十进制 2 GB），界面显示 `2000` MB。CloakBrowser 启动参数也按**字节**传入，对应 **`--fingerprint-storage-quota=2000000000`**，不会再除以 `1_000_000` 或设置隐式下限。留空或设为零不传此参数，使用引擎默认值。
 
-Chromix 的公开 quota flag 使用 **MiB**；bridge 将 Profile 中的字节数向上换算，例如 `2147483648` 字节转换为 `--fingerprint-storage-quota=2048`。Advanced 中直接填写的原始 flag 保持原值。随机和固定 seed 模式默认不传 Profile quota。详见 [Playwright runtime 契约](crates/desktop-core/resources/chromix/README.md)。
+Chromix 的公开 quota flag 使用 **MiB**；bridge 将 Profile 中的字节数向上换算，例如 `2147483648` 字节转换为 `--fingerprint-storage-quota=2048`。Advanced 中直接填写的原始 flag 保持原值。随机和固定 seed 模式默认不传 Profile quota。详见 [Playwright runtime 契约](desktop/resources/playwright/README.md)。
 
 此前在本机 CloakBrowser 上验证时，`navigator.storage.estimate().quota` 返回与其启动参数相同的字节数；更换内核版本后应重新核对其参数行为。
 
@@ -74,14 +76,14 @@ CloakBrowser/CFT 浏览器路径的优先级为：非空 `browserBinaryPath` 设
 
 ### 从源码开发
 
-桌面入口已迁移到 `desktop/`，Go module 为 `github.com/xiaozhou26/Cloaksession/desktop`。Rust workspace 保留浏览器业务，桌面后端包和可执行文件为 `desktop-core`。当前应用版本为 **1.3.0**，Wails CLI 和 Go 依赖均固定为 **v2.11.0**。
+桌面入口位于 `desktop/`，Go module 为 `github.com/xiaozhou26/Cloaksession/desktop`。当前目标版本为 **1.4.0**，Wails CLI 和 Go 依赖均固定为 **v2.11.0**。所有原 Rust 应用逻辑改由 Go 服务实现；无需 Rust、Cargo 或独立核心可执行文件。SQLite 使用 Go 驱动 `modernc.org/sqlite`（当前依赖 v1.34.5）；Wails 的系统 WebView 仍需要平台原生构建工具。
 
 准备以下环境：
 
-- Git、Rust stable / Cargo、Go **1.23.12**（CI 显式固定此版本，本机已验证）、Python **3.11+**。新版 Go 未必兼容固定 Wails 的分析工具；若遇到 `package "context" without types`，使用 Go 1.23.12 或设置 `GOTOOLCHAIN=go1.23.12`。
+- Git、Go **1.23.12**（CI 显式固定；1.4.0 的完整验证见验收记录）、Python **3.11+**。新版 Go 未必兼容固定 Wails 的分析工具；若遇到 `package "context" without types`，使用 Go 1.23.12 或设置 `GOTOOLCHAIN=go1.23.12`。
 - Node.js **22** 和 npm（Chromix 运行时至少需要 Node 20；安装包不内置 Node 或浏览器内核）。
-- Windows：MSVC C++ Build Tools、Windows SDK、WebView2 Runtime；生成安装包还需 NSIS 3（`choco install nsis -y`）。应用内嵌 WebView2 bootstrapper，可在缺失 Runtime 时提示安装，安装 Runtime 仍需网络。
-- macOS：Xcode Command Line Tools；universal 构建需要 arm64 / x86_64 Rust target，脚本会调用 `rustup target add`。
+- Windows：WebView2 Runtime；运行 `go test -race` 需支持 CGO 的 C 工具链（例如 MinGW-w64）；生成安装包还需 NSIS 3（`choco install nsis -y`）。应用内嵌 WebView2 bootstrapper，可在缺失 Runtime 时提示安装，安装 Runtime 仍需网络。
+- macOS：Xcode Command Line Tools；universal 由 Wails 编译 Go arm64 / x86_64 并合并，不安装 Rust target。
 - Ubuntu **22.04**：`sudo apt-get install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev libssl-dev`，这是 CI 的 Linux 基线。
 - Ubuntu **24.04**：将 WebKit 开发包替换为 `libwebkit2gtk-4.1-dev`，构建加 `--webkit2-41`，Go 测试和 Wails dev 加 `-tags webkit2_41`。4.0 和 4.1 构建不可混用。
 - 可运行的 CloakBrowser、CFT 或支持相应指纹 flags 的 Chromix 二进制；仅编译和多数测试不需要真实内核。
@@ -96,41 +98,43 @@ cd desktop
 go run github.com/wailsapp/wails/v2/cmd/wails@v2.11.0 dev -skipbindings
 ```
 
-`--prepare` 使用 `npm ci --legacy-peer-deps` 安装前端锁定依赖、`npm ci --omit=dev` 安装 Chromix runtime，并编译和放置 Rust sidecar。修改 Rust 代码后需重新执行；Wails dev 只自动重编译 Go / 前端。Vite 前端位于 `desktop/frontend`；只运行 Vite 不会提供 Go / Rust 后端。
+`--prepare` 用锁定的 npm 依赖构建前端 assets，放置 Playwright/companion 资源与图标，供 Wails dev 使用。修改 Go 代码由 Wails dev 重编译；资源/依赖更改后重新执行 prepare。Vite 位于 `desktop/frontend`；只运行 Vite 不提供 Go 后端。
 
 ### 构建与发布
 
 从仓库根目录执行：
 
 ```powershell
-python scripts/build.py                         # 本机编译并放置完整 runtime
-python scripts/build.py --package               # 本机编译并创建发布包
-python scripts/build.py --package --universal   # 仅 macOS，双架构 Go + Rust
-python scripts/build.py --check-version --tag v1.3.0
+python scripts/build.py                         # 本机 Go 编译并放置资源
+python scripts/build.py --test --package        # Go race 测试、编译并打包
+python scripts/build.py --package --universal   # 仅 macOS，Go 双架构
+python scripts/build.py --check-version --tag v1.4.0
 ```
 
-构建脚本重新执行锁定的 npm 安装和 `cargo build --release --locked -p desktop-core`（显式指定 host target，避免 Cargo 配置意外交叉编译），运行前端构建，再通过固定版本的 `go run .../wails@v2.11.0 build` 构建 Go 桌面。macOS universal 同时编译两个 Rust target 并用 `lipo` 合并，Wails 使用 `-platform darwin/universal`；脚本校验两个可执行文件均包含双架构。尊重 Cargo metadata 返回的 target 目录，包括自定义 `CARGO_TARGET_DIR`。这些是锁定依赖的可重复构建步骤，不承诺逐字节可复现。
+脚本运行前端 `npm ci --legacy-peer-deps`、Playwright runtime `npm ci --omit=dev` 和 `npm run build`，再执行固定 CLI `go run github.com/wailsapp/wails/v2/cmd/wails@v2.11.0 build`。`--test` 在编译前运行 Go race 测试。macOS universal 使用 `-platform darwin/universal` 并通过 `lipo` 校验主程序双架构；没有第二个业务后端可执行文件。这些是锁定依赖的可重复构建步骤，不承诺逐字节可复现。
 
-| 平台 | 可运行输出及 runtime 布局 | `desktop/build/dist/` 发布附件 |
+| 平台 | 可运行输出与资源 | `desktop/build/dist/` 发布附件 |
 | --- | --- | --- |
-| Windows x64 | `desktop/build/bin/Cloaksession.exe`、同目录 `desktop-core.exe`、`resources/chromix/` | `Cloaksession-1.3.0-windows-amd64-setup.exe`（NSIS） |
-| macOS universal | `desktop/build/bin/Cloaksession.app/Contents/MacOS/{Cloaksession,desktop-core}` 和 `Contents/Resources/chromix/` | `Cloaksession-1.3.0-macos-universal.zip` |
-| Linux x64 | `desktop/build/bin/Cloaksession`、同目录 `desktop-core`、`resources/chromix/` | `Cloaksession-1.3.0-linux-amd64.tar.gz` |
+| Windows x64 | `desktop/build/bin/Cloaksession.exe`、`resources/playwright/`、`resources/companion/` | `Cloaksession-1.4.0-windows-amd64-setup.exe`（NSIS） |
+| macOS universal | `desktop/build/bin/Cloaksession.app/Contents/MacOS/Cloaksession` 和 `Contents/Resources/{playwright,companion}/` | `Cloaksession-1.4.0-macos-universal.zip` |
+| Linux x64 | `desktop/build/bin/Cloaksession`、`resources/playwright/`、`resources/companion/` | `Cloaksession-1.4.0-linux-amd64.tar.gz` |
 
-资源保留兼容路径 `resources/chromix`，仅包含 Node bridge、npm manifest/lock 及生产 `node_modules/playwright-core`。每次构建执行 `npm ci --omit=dev` 清理旧依赖，打包仅复制清单文件与已校验的生产依赖，替换旧资源树，不携带已删除的 SDK/vendor；不要只复制主程序。Windows 安装器先检查窗口及主程序/sidecar 的独占写访问；存在运行中进程或文件锁时提示完全退出并点击 **Retry**，**Cancel** 在写文件前中止，不强杀进程。程序和 runtime 更新保留独立用户数据，文件名保留更新器识别的 **`-setup.exe`** 后缀。Linux 解压后运行 `Cloaksession/Cloaksession`，需要相应 GTK / WebKitGTK 运行库。macOS 解压后可将 `.app` 放入 Applications；脚本加入 runtime 后重新 ad-hoc 签名，**尚无 Developer ID 签名或公证**，Windows 也未配置 Authenticode，系统可能提示未受信任发行者。
+Playwright 资源源目录为 `desktop/resources/playwright`，只包含 bridge、npm manifest/lock 和生产 `playwright-core` 依赖；companion 源目录为 `desktop/resources/companion`。打包不会携带已删除的 SDK/vendor 或旧核心可执行文件。每次执行 `npm ci` 清理旧依赖，替换目标资源树；不要只复制主程序。
 
-[build.yml](.github/workflows/build.yml) 在 main / PR 上执行 Python 包装契约、Rust workspace、Chromix bridge、前端指纹目录、TypeScript/Vite、Playwright 和 Go race 测试；Linux 测试 job 显式构建 debug `desktop-core`，设置绝对路径 `CLOAKSESSION_TEST_CORE` / `CLOAKSESSION_RESOURCE_DIR`，让 `TestRealCoreRoundTrip` 实际运行而不是跳过，然后在 Windows、macOS universal、Ubuntu 22.04 编译并放置完整 runtime。[release.yml](.github/workflows/release.yml) 仅从 `v*` 标签发布（手动执行也必须选择标签）：先比对标签、Rust manifest/lock、前端 manifest/lock 和 Wails productVersion，并校验 Wails Go 依赖固定版本；复用同一测试与三平台构建流程，**全部成功后**才统一创建 GitHub Release，附三个安装/归档包及 `SHA256SUMS.txt`。已有同名 Release 不会被自动覆盖。
+Windows 安装器在写入前检查窗口及文件锁，提示完全退出所有浏览器会话和管理应用后 **Retry**，**Cancel** 在写入前中止，不强杀进程。升级清理旧版 helper 和旧资源路径，不删除独立用户数据，附件保留更新器识别的 **`-setup.exe`** 后缀。Linux 解压后运行 `Cloaksession/Cloaksession`，需要匹配 GTK/WebKitGTK 库。macOS ZIP 解压后可将 `.app` 放入 Applications；复制资源后重新 ad-hoc 签名，尚无 Developer ID 公证。Windows 未配置 Authenticode。
 
-发布前同步以上版本文件并提交源码，再推送对应标签（例如 `v1.3.0`）。不要将其他 Rust library crate 或第三方 runtime 依赖的独立版本强制改成桌面版本。CI 配置不是发布成功或真实内核验收记录；各平台安装、升级与浏览器行为仍需运行验证。
+[build.yml](.github/workflows/build.yml) 执行 Python 包装契约、Node bridge、前端单元、TypeScript/Vite、Go race 和完整 Playwright UI 测试（当前套件 68 项，含原有 52 项及新增错误处理回归），随后在 Windows、macOS universal、Ubuntu 22.04 编译；没有 Rust 工具链、缓存或测试步骤。UI 测试模拟桌面桥，不是 Go 后端验收。安装 Chrome 后显式设置 `CLOAKSESSION_TEST_BROWSER` 并运行 `TestServiceRealBrowser`，验证 Go 服务通过 Playwright 启动浏览器、CDP 端点和关闭，不依赖旧核心进程。
+
+[release.yml](.github/workflows/release.yml) 在版本标签上验证 Wails productVersion、前端及 runtime manifest/lock、Wails Go pin；复用全部测试与三平台打包，全部成功后才统一创建 Release，附三个附件及 `SHA256SUMS.txt`。既有 Release 不自动覆盖。**1.3.0 的发布已暂停，不应把旧标签/旧包视为纯 Go 发布；下一目标为 v1.4.0，需完成纯 Go 回归后再由维护者决定发布。** 本次迁移不创建或推送标签。
 
 ## 本地数据与备份
 
-Wails 桌面显式沿用旧版 Tauri 的数据目录标识 **`com.cloaksession.browser`**，不会因框架切换创建新的 Profile 数据库：
+Go 存储层沿用数据目录标识 **`com.cloaksession.browser`** 和 `profiles.db` 文件。迁移前必须备份并验证旧库兼容，不因实现语言切换清空用户数据：
 
 - Windows：`%LOCALAPPDATA%\com.cloaksession.browser\`。
 - macOS：`~/Library/Application Support/com.cloaksession.browser/`。
 - Linux：`$XDG_DATA_HOME/com.cloaksession.browser/`，未设置时使用 `~/.local/share/com.cloaksession.browser/`。
-- `CLOAKSESSION_DATA_DIR` 可显式覆盖数据根目录（开发/测试时可用独立临时目录）；路径不可用会报错，不静默退回当前目录。
+- `CLOAKSESSION_DATA_DIR` 可显式覆盖数据根目录（开发/测试时可用独立临时目录）；建议使用明确的绝对路径，避免误读其他目录。
 
 升级前关闭所有浏览器 Profile 和管理应用，备份整个旧数据目录；保留 `profiles.db`、`settings.json`、`mcp-token`、`profiles/` 和 `extensions/`。安装/解压不会主动清空这些文件，卸载器也不会删除此目录。若旧版本因自定义路径或异常回退使用了其他位置，先备份，再显式指定原位置，不要在应用运行时复制数据库。
 
@@ -141,7 +145,7 @@ Wails 桌面显式沿用旧版 Tauri 的数据目录标识 **`com.cloaksession.b
 | `settings.json` | 应用设置，JSON 键使用 camelCase |
 | `mcp-token` | MCP Bearer 凭据，在应用启动时读取或生成 |
 | `extensions/` | 共享的解包扩展文件 |
-| `companion/` | 从应用内嵌资源写出的 Chrome Web Store 辅助扩展 |
+| `companion/` | 由 companion 资源提供的 Chrome Web Store 辅助扩展 |
 
 界面的部分偏好保存在 WebView 的 localStorage；Wails 与旧 Tauri WebView 的 origin / 存储可能不同，这些界面偏好不保证自动迁移，不能用它们是否重置判断 Profile 数据丢失。MCP 活动历史只保存在内存中，最多保留 500 条，应用重启后清空。
 
@@ -152,7 +156,7 @@ Wails 桌面显式沿用旧版 Tauri 的数据目录标识 **`com.cloaksession.b
 
 ## MCP 连接
 
-MCP 服务嵌入桌面应用管理的 Rust `desktop-core` 进程运行，无需另外启动一个 `mcp-server` 可执行程序。默认随应用启动，仅绑定 **`127.0.0.1:7777`**。
+MCP 服务在 Wails Go 主进程中运行，无需另外启动核心或 MCP 可执行程序。默认随应用启动，仅绑定 **`127.0.0.1:7777`**。
 
 | 项目 | 当前实现 |
 | --- | --- |
@@ -174,7 +178,7 @@ MCP 服务嵌入桌面应用管理的 Rust `desktop-core` 进程运行，无需�
 
 - `mcpHttpEnabled` 控制**下次应用启动时**是否创建服务。改变开关不会立即关闭或启动当前监听；`mcpHttpPort` 也只在启动时读取。修改后需要完全重启 Cloaksession，并同步客户端地址。
 - 当前 Settings 界面没有端口输入框；需要改端口时，在应用退出后编辑 `settings.json` 的 `mcpHttpPort`，保留其他配置。
-- **当前 `system_info` 返回的地址固定为 7777**，界面中的地址和 “listening” 不反映真实绑定结果。自定义端口、关闭服务或端口冲突后，应以实际配置、`/healthz` 请求及后端日志为准。
+- Go 服务的 `system_info` 返回实际配置并启动的 MCP 地址；关闭服务时不应显示可用端点。端口冲突会导致初始化失败，自定义端口后仍应通过 `/healthz` 和后端日志确认监听。
 - 合法的 `mcp-token` 会跨重启复用；文件缺失或格式无效时重新生成。更换令牌后需重启应用，并更新所有客户端。不要分享令牌，也不要把服务通过端口转发暴露给不受信任的网络。
 - `401` 通常是 Bearer 缺失或不匹配，`403` 是 Host 不在允许列表，连接失败则检查应用是否运行、是否启用 MCP 以及端口占用。
 
@@ -182,65 +186,41 @@ MCP 服务嵌入桌面应用管理的 Rust `desktop-core` 进程运行，无需�
 
 ## 项目结构
 
-仓库包含 Rust workspace 和独立的 Wails Go module：
+仓库以 `desktop/` Go module 为后端，前端仍使用 React / TypeScript：
 
 | 路径 | 职责 |
 | --- | --- |
-| [`crates/multizen-core`](crates/multizen-core/src) | Profile、指纹、设置、错误等共享数据类型；名称保留历史标识 |
-| [`crates/profile-manager`](crates/profile-manager/src) | SQLite 持久化、迁移、默认指纹和 Profile 数据目录 |
-| [`crates/settings-store`](crates/settings-store/src) | JSON 设置加载、默认值归一化和进程内缓存 |
-| [`crates/browser-launcher`](crates/browser-launcher/src) | 浏览器进程、启动参数、版本检测、代理桥接、出口查询和会话恢复 |
-| [`crates/behavioral`](crates/behavioral/src) | 鼠标路径、按键间隔和滚动曲线生成 |
-| [`crates/cdp-driver`](crates/cdp-driver/src) | CDP 会话、目标页面、指纹 bootstrap、页面操作及低层请求 |
-| [`crates/mcp-server`](crates/mcp-server/src) | MCP 工具元数据、参数 schema、JSON-RPC / HTTP、认证与活动记录 |
-| [`crates/desktop-core`](crates/desktop-core/src) | Rust sidecar、命令分发、内嵌 MCP、归档、扩展和更新集成 |
-| [`desktop`](desktop) | Wails v2 Go 入口、原生窗口/对话框、sidecar 生命周期、绑定与事件桥接 |
-| [`desktop/frontend`](desktop/frontend/src) | React 19、TypeScript、Vite 6、Tailwind CSS 4 界面 |
-| [`scripts/build.py`](scripts/build.py) | 锁定依赖安装、双架构编译、runtime 放置与平台打包 |
+| [`desktop`](desktop) | Wails 入口、Go 应用服务、绑定、原生窗口/对话框和事件 |
+| [`desktop/internal`](desktop/internal) | Go 存储、浏览器进程/CDP/代理、MCP 和扩展等业务包 |
+| [`desktop/frontend`](desktop/frontend/src) | React 19、TypeScript、Vite 6、Tailwind CSS 4 |
+| [`desktop/resources/playwright`](desktop/resources/playwright) | 本地浏览器 Node/Playwright bridge 与锁定依赖 |
+| [`desktop/resources/companion`](desktop/resources/companion) | Chrome Web Store 辅助扩展 |
+| [`scripts/build.py`](scripts/build.py) | 版本核对、npm 安装、Go 构建和原生包装 |
 
-UI 经 Wails Go binding 及 stdio JSON RPC 进入 Rust sidecar 的应用驱动，原生对话框和事件由 Go 桥接；MCP HTTP 经工具分发进入同一 Rust 驱动；驱动协调 Profile 持久化、浏览器启动器和 CDP 会话。MCP 层不内置大模型，模型和客户端由使用者选择。
+UI 经 Wails binding 直接进入 Go 服务；MCP HTTP 进入同一应用业务层。SQLite 使用纯 Go 驱动，Chromix 路径保留 Node/Playwright bridge，Node 和浏览器仍是外部进程。这里的“全 Go”指应用后端不再有 Rust，不表示 UI、Node bridge 或系统 WebView 改成 Go，也不表示应用包含浏览器内核。
 
 ## 检查与测试
 
-在开发依赖齐备后，从仓库根目录执行：
+从仓库根目录执行：
 
 ```powershell
-python scripts/build.py --check-version
+python scripts/build.py --check-version --tag v1.4.0
 python -m unittest discover -s scripts -p "test_*.py"
 npm --prefix desktop/frontend ci --legacy-peer-deps
-npm --prefix crates/desktop-core/resources/chromix ci
-npm --prefix crates/desktop-core/resources/chromix test
+npm --prefix desktop/resources/playwright ci
+npm --prefix desktop/resources/playwright test
 node --experimental-strip-types desktop/frontend/src/lib/chromixFingerprint.test.mjs
 npm --prefix desktop/frontend run build
-cargo check --workspace --locked
-cargo test --workspace --locked
 cd desktop
-go test -mod=readonly ./...
+go test -race -count=1 -mod=readonly -v ./...
 cd frontend
 npx playwright install chrome
 npx playwright test --config playwright.config.ts
 ```
 
-前端构建包含 TypeScript 检查，`npm test` 运行 Playwright；浏览器 UI 测试使用模拟桌面桥，不等同于安装后的 Go/Rust 端到端验收。Go 测试前必须先构建嵌入的前端 assets。Rust 测试覆盖 Profile / 设置持久化、启动参数、代理桥接、行为算法、CDP 辅助逻辑和 MCP 工具与传输。Chromix 测试包括 bridge 选项和进程契约；真实二进制 smoke 需要设置 `CHROMIX_TEST_BINARY`，按目标内核重新核对硬件与存储字段。
+Go 测试前必须先生成嵌入的前端 assets；Linux 还需安装 Wails WebKitGTK 依赖。Node bridge 测试、前端单元与 UI 回归不证明 Go 存储、MCP、扩展或真实浏览器生命周期已经通过。真实浏览器入口现为 `desktop/service_test.go` 的 `TestServiceRealBrowser`，设置 `CLOAKSESSION_TEST_BROWSER` 为本地 Chrome 可执行文件的绝对路径后运行 `go test -race -count=1 -mod=readonly -v -run '^TestServiceRealBrowser$' .`（工作目录 `desktop`）；未设置会跳过。CI 安装 Chrome 后明确运行该入口，不再使用旧 Rust sidecar 环境变量或 Cargo ignored 测试。
 
-需要真实浏览器的测试默认标记为忽略，仅加环境变量还不够，必须同时传 `-- --ignored`：
-
-- `browser-launcher/tests/driver.rs`：设置 `RUN_CDP_INTEGRATION=1` 和指向实际内核的 `MULTIZEN_TEST_BINARY`，运行 `cargo test -p browser-launcher --test driver -- --ignored`。该测试会自行启动、关闭浏览器。
-- `cdp-driver/tests/integration.rs`：先准备可连接的 CDP 浏览器，设置 `RUN_CDP_INTEGRATION=1`，必要时设置 `MULTIZEN_TEST_CDP`（默认 `http://127.0.0.1:9222`），运行 `cargo test -p cdp-driver --test integration -- --ignored`。测试会访问 `https://example.com`。
-
-真实 Go/Rust RPC 集成（不启动浏览器）在 Linux CI 必跑；本地可从仓库根目录执行：
-
-```bash
-cargo build --locked -p desktop-core
-export CLOAKSESSION_TEST_CORE="$PWD/target/debug/desktop-core"
-export CLOAKSESSION_RESOURCE_DIR="$PWD/crates/desktop-core/resources"
-cd desktop
-GOTOOLCHAIN=go1.23.12 go test -race -count=1 -mod=readonly -v ./...
-```
-
-先构建前端 assets；Windows 将可执行文件改为 `desktop-core.exe` 并使用对应环境变量语法。此测试覆盖真实 sidecar 启动、命令往返、Profile CRUD、原生对话框桥接的归档导入/导出和关闭，仍不等于真实浏览器 GUI 验收。
-
-这些变量和部分内部包名仍使用 `MULTIZEN_*`，请按源码中的名称设置。构建及发布工作流会执行锁定的完整 Rust workspace 测试（含 quota 回归）及前端/Go 测试，但不执行需要真实内核的 ignored 测试。
+真实浏览器/指纹、历史 SQLite 迁移、`.mzar` 兼容、安装升级和进程清理仍须针对纯 Go 实现验证。[验收记录](docs/ACCEPTANCE.md) 区分本次执行结果与历史 1.3.0 证据；不能复用旧包的通过状态。
 
 ## 许可证
 

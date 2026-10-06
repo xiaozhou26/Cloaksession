@@ -27,6 +27,11 @@ export function Settings({ onImport }: Props): JSX.Element {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [mcpPort, setMcpPort] = useState("");
+  useEffect(() => {
+    if (settings) setMcpPort(String(settings.mcpHttpPort));
+  }, [settings?.mcpHttpPort]);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [copied, setCopied] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenShown, setTokenShown] = useState(false);
@@ -36,24 +41,27 @@ export function Settings({ onImport }: Props): JSX.Element {
   useEffect(() => {
     let unlisten = (): void => {};
     let active = true;
-    void settingsApi.get().then(setSettings).catch((error) => setSettingsError(String(error)));
-    void system.info().then(setInfo);
-    void update.status().then(setUpdateStatus);
-    void update.lastChecked().then(setLastChecked);
+    const failed = (error: unknown): void => {
+      if (active) setSettingsError(`Could not load settings: ${error instanceof Error ? error.message : String(error)}`);
+    };
+    void settingsApi.get().then(setSettings).catch(failed);
+    void system.info().then(setInfo).catch(failed);
+    void update.status().then(setUpdateStatus).catch(failed);
+    void update.lastChecked().then(setLastChecked).catch(failed);
     // Refresh "last checked" on every status change too, so a background
     // auto-check updates the label live while Settings is open.
     void onUpdateStatus((s) => {
       setUpdateStatus(s);
-      void update.lastChecked().then(setLastChecked);
+      void update.lastChecked().then(setLastChecked).catch(failed);
     }).then((fn) => {
       if (active) unlisten = fn;
       else fn();
-    });
+    }).catch(failed);
     return () => {
       active = false;
       unlisten();
     };
-  }, []);
+  }, [loadAttempt]);
 
   async function patch(p: Partial<AppSettings>): Promise<void> {
     if (!settings) return;
@@ -85,15 +93,29 @@ export function Settings({ onImport }: Props): JSX.Element {
     window.setTimeout(() => setTokenCopied(false), 1500);
   }
 
+  const retryLoad = (): void => {
+    setSettingsError(null);
+    setLoadAttempt((attempt) => attempt + 1);
+  };
+  const loadError = settingsError && (
+    <div role="alert" className="text-[12px] text-red-300 mb-3 break-words">
+      <p>{settingsError}</p>
+      <button type="button" className="btn-secondary mt-2 rounded-lg px-3 py-1.5" onClick={retryLoad}>Retry settings</button>
+    </div>
+  );
+
   if (!settings) {
     return (
       <div className="flex-1 overflow-auto p-8">
         <div className="max-w-[720px] mx-auto text-[13px] text-slate-500">
-          {settingsError ? <p role="alert" className="text-red-300">{settingsError}</p> : "Loading…"}
+          {loadError || "Loading…"}
         </div>
       </div>
     );
   }
+
+  const mcpRunning = !!info?.mcpHttpUrl && !info.mcpError;
+  const validMcpPort = /^\d+$/.test(mcpPort) && Number(mcpPort) >= 1 && Number(mcpPort) <= 65535;
 
   return (
     <div role="region" aria-label="Settings" className="flex-1 min-w-0 overflow-auto px-3 py-5 sm:px-8 sm:py-6">
@@ -104,7 +126,7 @@ export function Settings({ onImport }: Props): JSX.Element {
           Chromix uses Playwright with a local browser executable.
         </div>
 
-        {settingsError && <p role="alert" className="text-[12px] text-red-300 mb-3 break-words">{settingsError}</p>}
+        {loadError}
 
         <Row
           icon={<Zap size={16} strokeWidth={1.5} />}
@@ -112,11 +134,11 @@ export function Settings({ onImport }: Props): JSX.Element {
           desc="Local HTTP transport that Cursor / Claude Desktop / Cline / any MCP client connects to. Requires the auth token below. The MCP tab has ready-to-paste client configs."
         >
           <div className="flex gap-2 items-center flex-wrap">
-            <Pill kind={info?.mcpHttpUrl ? "running" : "idle"} dot={!!info?.mcpHttpUrl}>
-              {info?.mcpHttpUrl ? `running on :${settings.mcpHttpPort}` : "off"}
+            <Pill kind={info?.mcpError ? "error" : mcpRunning ? "running" : "idle"} dot={mcpRunning}>
+              {info?.mcpError ? "unavailable" : mcpRunning ? `running on :${new URL(info!.mcpHttpUrl).port}` : "off"}
             </Pill>
 
-            {info?.mcpHttpUrl && (
+            {mcpRunning && info && (
               <div
                 className="flex-1 min-w-0 basis-[220px] flex items-center gap-2"
                 style={{
@@ -141,7 +163,7 @@ export function Settings({ onImport }: Props): JSX.Element {
             )}
           </div>
 
-          {info?.mcpAuthToken && (
+          {mcpRunning && info?.mcpAuthToken && (
             <div className="mt-2">
               <div className="text-[11px] text-slate-500 mb-1">
                 Auth token — required. Send as{" "}
@@ -179,6 +201,19 @@ export function Settings({ onImport }: Props): JSX.Element {
               </div>
             </div>
           )}
+
+          {info?.mcpError && <div role="alert" className="mt-3 break-words text-[12px] text-red-300">
+            <p>MCP could not start: {info.mcpError}</p>
+            <p className="mt-1">Profiles remain usable. Choose another port or disable auto-start below, then restart Cloaksession.</p>
+          </div>}
+          <div className="mt-3 space-y-1.5">
+            <label htmlFor="mcp-http-port" className="block text-[12px] text-slate-400">MCP HTTP port</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <input id="mcp-http-port" type="text" inputMode="numeric" value={mcpPort} onChange={(event) => setMcpPort(event.target.value)} aria-invalid={!validMcpPort} aria-describedby="mcp-port-help" className="min-w-0 w-28 rounded-lg bg-white/5 px-2.5 py-2 text-[12px] text-slate-200" />
+              <button type="button" className="btn-secondary rounded-lg px-3 py-2 text-[12px]" disabled={!validMcpPort || Number(mcpPort) === settings.mcpHttpPort} onClick={() => void patch({ mcpHttpPort: Number(mcpPort) })}>Save MCP port</button>
+            </div>
+            <p id="mcp-port-help" className="text-[11px] text-slate-500">Use a port from 1 to 65535. Port and auto-start changes apply after restarting Cloaksession, not immediately.</p>
+          </div>
 
           <label className="flex items-center gap-2.5 mt-3 text-[12px] text-slate-400 cursor-pointer">
             <input

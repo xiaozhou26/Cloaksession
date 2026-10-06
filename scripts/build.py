@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the Wails desktop, stage its Rust runtime, and optionally package it."""
+"""Build the Wails desktop, stage its browser resources, and optionally package it."""
 
 import argparse
 import json
@@ -11,12 +11,12 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 DESKTOP = ROOT / "desktop"
 FRONTEND = DESKTOP / "frontend"
-CHROMIX = ROOT / "crates/desktop-core/resources/chromix"
+PLAYWRIGHT = DESKTOP / "resources/playwright"
+COMPANION = DESKTOP / "resources/companion"
 BIN = DESKTOP / "build/bin"
 DIST = DESKTOP / "build/dist"
 WAILS_VERSION = "v2.11.0"
@@ -40,10 +40,7 @@ def read_json(path):
 
 
 def verify_versions(tag=None):
-    cargo = tomllib.loads((ROOT / "crates/desktop-core/Cargo.toml").read_text())
-    version = cargo["package"]["version"]
-    if cargo["package"]["name"] != "desktop-core":
-        raise RuntimeError("Rust desktop package must be named desktop-core")
+    version = read_json(DESKTOP / "wails.json")["info"]["productVersion"]
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise RuntimeError("Desktop version must be a numeric major.minor.patch version")
     lock = read_json(FRONTEND / "package-lock.json")
@@ -51,15 +48,13 @@ def verify_versions(tag=None):
         "frontend/package.json": read_json(FRONTEND / "package.json")["version"],
         "frontend/package-lock.json": lock["version"],
         "frontend/package-lock.json packages root": lock["packages"][""]["version"],
-        "wails.json info.productVersion": read_json(DESKTOP / "wails.json")["info"]["productVersion"],
+        "resources/playwright/package.json": read_json(PLAYWRIGHT / "package.json")["version"],
+        "resources/playwright/package-lock.json": read_json(PLAYWRIGHT / "package-lock.json")["version"],
+        "resources/playwright/package-lock.json packages root": read_json(PLAYWRIGHT / "package-lock.json")["packages"][""]["version"],
     }
-    cargo_lock = tomllib.loads((ROOT / "Cargo.lock").read_text())
-    core_versions = [p["version"] for p in cargo_lock["package"] if p["name"] == "desktop-core"]
-    if core_versions != [version]:
-        raise RuntimeError(f"Cargo.lock desktop-core version mismatch: {core_versions}")
     for source, actual in versions.items():
         if actual != version:
-            raise RuntimeError(f"{source}: {actual!r} does not match desktop-core {version}")
+            raise RuntimeError(f"{source}: {actual!r} does not match Wails productVersion {version}")
     go_mod = (DESKTOP / "go.mod").read_text()
     if not re.search(r"(?m)^module github\.com/xiaozhou26/Cloaksession/desktop\s*$", go_mod):
         raise RuntimeError("Unexpected desktop Go module path")
@@ -72,8 +67,8 @@ def verify_versions(tag=None):
 
 
 def verify_runtime_manifest():
-    manifest = read_json(CHROMIX / "package.json")
-    lock = read_json(CHROMIX / "package-lock.json")
+    manifest = read_json(PLAYWRIGHT / "package.json")
+    lock = read_json(PLAYWRIGHT / "package-lock.json")
     dependencies = manifest.get("dependencies", {})
     if set(dependencies) != {"playwright-core"} or manifest.get("devDependencies"):
         raise RuntimeError("Browser bridge must depend only on playwright-core")
@@ -87,26 +82,7 @@ def verify_runtime_manifest():
 def install_dependencies():
     verify_runtime_manifest()
     run(["npm", "ci", "--legacy-peer-deps"], cwd=FRONTEND)
-    run(["npm", "ci", "--omit=dev"], cwd=CHROMIX)
-
-
-def rust_sidecar(universal):
-    metadata = json.loads(run(["cargo", "metadata", "--no-deps", "--format-version", "1", "--locked"], capture=True))
-    target = Path(metadata["target_directory"])
-    if universal:
-        targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
-        for triple in targets:
-            run(["rustup", "target", "add", triple])
-            run(["cargo", "build", "--release", "--locked", "-p", "desktop-core", "--target", triple])
-        output = target / "universal-apple-darwin/release/desktop-core"
-        output.parent.mkdir(parents=True, exist_ok=True)
-        run(["lipo", "-create", *[target / triple / "release/desktop-core" for triple in targets], "-output", output])
-        run(["lipo", output, "-verify_arch", "arm64", "x86_64"])
-        return output
-    # An explicit host target avoids accidentally packaging a configured cross target.
-    host = next(line.split(": ", 1)[1] for line in run(["rustc", "-vV"], capture=True).splitlines() if line.startswith("host: "))
-    run(["cargo", "build", "--release", "--locked", "-p", "desktop-core", "--target", host])
-    return target / host / "release" / ("desktop-core.exe" if sys.platform == "win32" else "desktop-core")
+    run(["npm", "ci", "--omit=dev"], cwd=PLAYWRIGHT)
 
 
 def replace_tree(source, destination):
@@ -120,20 +96,32 @@ def stage_browser_resources(destination):
     verify_runtime_manifest()
     required = ["bridge.mjs", "package.json", "package-lock.json", "node_modules/playwright-core/package.json"]
     for name in required:
-        if not (CHROMIX / name).is_file():
+        if not (PLAYWRIGHT / name).is_file():
             raise RuntimeError(f"Missing packaged browser resource: {name}")
-    installed = {path.name for path in (CHROMIX / "node_modules").iterdir()}
+    installed = {path.name for path in (PLAYWRIGHT / "node_modules").iterdir()}
     if installed - {"playwright-core", ".bin", ".package-lock.json"}:
         raise RuntimeError("Unexpected browser dependencies; run npm ci --omit=dev before packaging")
     if destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
     for name in ("bridge.mjs", "package.json", "package-lock.json"):
-        shutil.copy2(CHROMIX / name, destination / name)
-    replace_tree(CHROMIX / "node_modules", destination / "node_modules")
+        shutil.copy2(PLAYWRIGHT / name, destination / name)
+    replace_tree(PLAYWRIGHT / "node_modules", destination / "node_modules")
 
 
-def stage_runtime(sidecar):
+def stage_resources(resources):
+    stage_browser_resources(resources / "playwright")
+    for name in ("manifest.json", "cs.js"):
+        if not (COMPANION / name).is_file():
+            raise RuntimeError(f"Missing companion resource: {name}")
+    replace_tree(COMPANION, resources / "companion")
+    shutil.copy2(ROOT / "LICENSE", resources / "LICENSE")
+    legacy = resources / "chromix"
+    if legacy.exists():
+        shutil.rmtree(legacy)
+
+
+def stage_runtime():
     if sys.platform == "darwin":
         app = BIN / "Cloaksession.app"
         executable = app / "Contents/MacOS/Cloaksession"
@@ -143,12 +131,11 @@ def stage_runtime(sidecar):
         resources = BIN / "resources"
     if not executable.is_file():
         raise RuntimeError(f"Wails output missing: {executable}")
-    shutil.copy2(sidecar, executable.parent / sidecar.name)
-    stage_browser_resources(resources / "chromix")
-    shutil.copy2(ROOT / "LICENSE", resources / "LICENSE")
+    for legacy in ("desktop-core", "desktop-core.exe"):
+        (executable.parent / legacy).unlink(missing_ok=True)
+    stage_resources(resources)
     if sys.platform == "darwin":
-        # Adding the sidecar/resources invalidates Wails' initial ad-hoc signature.
-        run(["codesign", "--force", "--sign", "-", executable.parent / sidecar.name])
+        # Adding resources invalidates Wails' initial ad-hoc signature.
         run(["codesign", "--force", "--deep", "--sign", "-", app])
         run(["codesign", "--verify", "--deep", "--strict", app])
     return executable
@@ -180,7 +167,7 @@ def package(version, universal):
     else:
         asset = DIST / f"Cloaksession-{version}-linux-{arch}.tar.gz"
         with tarfile.open(asset, "w:gz") as archive:
-            for name in ("Cloaksession", "desktop-core", "resources"):
+            for name in ("Cloaksession", "resources"):
                 archive.add(BIN / name, arcname=f"Cloaksession/{name}")
     if not asset.is_file():
         raise RuntimeError(f"Package was not created: {asset}")
@@ -192,9 +179,10 @@ def main():
     parser.add_argument("--package", action="store_true", help="also create a platform release asset")
     parser.add_argument("--universal", action="store_true", help="build both macOS architectures and combine them")
     parser.add_argument("--webkit2-41", action="store_true", help="Linux only: use WebKitGTK 4.1 instead of 4.0")
-    parser.add_argument("--prepare", action="store_true", help="install npm dependencies and stage the release sidecar for wails dev")
+    parser.add_argument("--prepare", action="store_true", help="install npm dependencies, build frontend assets, and stage resources for wails dev")
+    parser.add_argument("--test", action="store_true", help="run Go tests with the race detector before building")
     parser.add_argument("--check-version", action="store_true", help="only verify synchronized application/tool versions")
-    parser.add_argument("--tag", help="require this exact release tag, e.g. v1.3.0")
+    parser.add_argument("--tag", help="require this exact release tag, e.g. v1.4.0")
     args = parser.parse_args()
     if args.universal and sys.platform != "darwin":
         parser.error("--universal requires macOS")
@@ -203,20 +191,24 @@ def main():
     if args.prepare and args.package:
         parser.error("--prepare and --package are mutually exclusive")
     version = verify_versions(args.tag)
+    verify_runtime_manifest()
     if args.check_version:
         return
     install_dependencies()
-    sidecar = rust_sidecar(args.universal)
     BIN.mkdir(parents=True, exist_ok=True)
     shutil.copy2(DESKTOP / "icons/icon.png", DESKTOP / "build/appicon.png")
     (DESKTOP / "build/windows").mkdir(parents=True, exist_ok=True)
     shutil.copy2(DESKTOP / "icons/icon.ico", DESKTOP / "build/windows/icon.ico")
     # The Go embed requires dist even before the development watcher starts.
     run(["npm", "run", "build"], cwd=FRONTEND)
+    if args.test:
+        test_command = ["go", "test", "-race", "-count=1", "-mod=readonly"]
+        if args.webkit2_41:
+            test_command += ["-tags", "webkit2_41"]
+        run([*test_command, "./..."], cwd=DESKTOP)
     if args.prepare:
-        shutil.copy2(sidecar, BIN / sidecar.name)
         resources = BIN.parent / "Resources" if sys.platform == "darwin" else BIN / "resources"
-        stage_browser_resources(resources / "chromix")
+        stage_resources(resources)
         print(f"Development runtime staged in {BIN}")
         return
     # The frontend uses the typed window.go bridge, not generated wailsjs files.
@@ -228,7 +220,7 @@ def main():
     if sys.platform == "win32":
         command += ["-webview2", "embed"]
     run(command, cwd=DESKTOP)
-    executable = stage_runtime(sidecar)
+    executable = stage_runtime()
     if args.universal:
         run(["lipo", executable, "-verify_arch", "arm64", "x86_64"])
     if args.package:

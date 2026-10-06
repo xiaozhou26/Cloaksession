@@ -1,35 +1,21 @@
 /**
- * TypeScript mirrors of the Rust serde types consumed through the Wails
- * command bridge. All Rust structs use
- * `#[serde(rename_all = "camelCase")]`, so the TS field names are the
- * camelCase versions of the Rust field names.
- *
- * These types are intentionally conservative: every field that the
- * command signatures return is modeled. Fields that are not yet needed
- * by the UI are still included when they are part of the Rust struct,
- * to keep the mirrors faithful. Where a Rust type leaves a field
- * optional (`Option<T>`), the TS field is `T | null` (serde serializes
- * `None` as `null`).
- *
- * Source of truth:
- *   crates/multizen-core/src/profile.rs
- *   crates/multizen-core/src/settings.rs
- *   crates/mcp-server/src/activity.rs
- *   crates/desktop-core/src/driver.rs
- *   crates/desktop-core/src/commands/system.rs
+ * Compatible camelCase JSON types returned by the pure-Go Wails service.
+ * Nullable and optional fields retain the persisted domain contract.
+ * Sources: desktop/internal/store, desktop/internal/browser,
+ * desktop/internal/mcp, desktop/app.go, and desktop/service.go.
  */
 
 // ---------------------------------------------------------------------------
-// Profile domain (crates/multizen-core/src/profile.rs)
+// Profile domain (desktop/internal/store)
 // ---------------------------------------------------------------------------
 
 export type ProfileId = string;
 
-/** `ProxyConfig.proxy_type` ("http" | "socks5"). Kept as string for forward compat. */
+/** Proxy protocol ("http" | "socks5"). Kept as string for forward compat. */
 export type ProxyType = string;
 
 export interface ProxyConfig {
-  /** Rust field `proxy_type` renamed via `#[serde(rename = "type")]`. */
+  /** Compatible JSON key for the proxy protocol. */
   type: ProxyType;
   host: string;
   port: number;
@@ -37,13 +23,7 @@ export interface ProxyConfig {
   password?: string | null;
 }
 
-/**
- * `DeviceFamily` enum uses `#[serde(rename_all = "kebab-case")]` plus
- * per-variant `#[serde(rename = "...")]`, so the serialized form is the
- * kebab-case string (e.g. "macbook-pro-14-m3"). We model it as a string
- * union for type-safety; the UI can use the `fingerprint_devices`
- * command to enumerate valid values at runtime.
- */
+/** Compatible kebab-case device IDs; enumerate available values with fingerprint_devices. */
 export type DeviceFamily =
   | "macbook-pro-14-m3"
   | "macbook-pro-14-m3-pro"
@@ -193,7 +173,7 @@ export interface LaunchedProfile {
 }
 
 // ---------------------------------------------------------------------------
-// Settings (crates/multizen-core/src/settings.rs)
+// Settings (desktop/internal/store)
 // ---------------------------------------------------------------------------
 
 export type BrowserEngine = "cft" | "cloakbrowser" | "chromix";
@@ -217,7 +197,7 @@ export interface AppSettings {
 }
 
 // ---------------------------------------------------------------------------
-// Activity (crates/mcp-server/src/activity.rs)
+// Activity (desktop/internal/mcp)
 // ---------------------------------------------------------------------------
 
 export interface ActivityEvent {
@@ -232,8 +212,8 @@ export interface ActivityEvent {
 }
 
 // ---------------------------------------------------------------------------
-// Push event payloads (crates/desktop-core/src/driver.rs)
-// Wails forwards the Rust event payloads without an envelope.
+// Push event payloads (desktop/internal/browser)
+// Wails forwards the Go event payloads without an envelope.
 // ---------------------------------------------------------------------------
 
 export type RunningStateChange =
@@ -241,7 +221,7 @@ export type RunningStateChange =
   | { kind: "closing"; profileId: ProfileId }
   | { kind: "closed"; profileId: ProfileId; reason: "user-close" | "external-exit" };
 
-/** Legacy global bootstrap status, distinct from per-profile Rust launch events. */
+/** Legacy global bootstrap status, distinct from per-profile Go launch events. */
 export type ChromiumStatus =
   | { kind: "ready" }
   | { kind: "dev-system" }
@@ -256,11 +236,12 @@ export type ChromiumStatus =
 export type ChromiumStatusEvent = ChromiumStatus;
 
 // ---------------------------------------------------------------------------
-// System info (crates/desktop-core/src/commands/system.rs)
+// System info (desktop/service.go)
 // ---------------------------------------------------------------------------
 
 export interface SystemInfo {
   mcpHttpUrl: string;
+  mcpError?: string;
   mcpAuthToken?: string | null;
   appVersion: string;
   platform: string;
@@ -307,7 +288,7 @@ export interface ProxyGeoResult {
   ip: string;
 }
 
-/** Update-checker status emitted by the Rust core. */
+/** Update-checker status emitted by the Go service. */
 export type UpdateStatus =
   | { kind: "idle" }
   | { kind: "checking" }

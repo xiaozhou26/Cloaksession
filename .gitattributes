@@ -8,4 +8,5 @@
 # .trellis/spec/cli/backend/directory-structure.md for details.
 .trellis/workspace/*/journal-*.md merge=union
 
-crates/tauri-app/resources/chromix/vendor/chromix/** text eol=lf
+desktop/resources/**/*.mjs text eol=lf
+*.go text eol=lf

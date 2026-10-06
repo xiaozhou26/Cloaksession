@@ -1,5 +1,5 @@
-/target
-**/*.rs.bk
+# Build output left by releases before 1.4.0
+/target/
 
 # IDE
 /.idea/

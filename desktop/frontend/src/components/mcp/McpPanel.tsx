@@ -11,6 +11,8 @@ interface Props {
   mcpUrl: string | null;
   /** Bearer token every MCP client must send; null when the server is off. */
   mcpToken: string | null;
+  mcpError?: string;
+  onSettings: () => void;
 }
 
 /**
@@ -18,7 +20,7 @@ interface Props {
  * does. Top half = a "Connect an agent" card (endpoint + copy-paste client
  * config); bottom half = the live feed of MCP tool calls.
  */
-export function McpPanel({ events, profiles, mcpUrl, mcpToken }: Props): JSX.Element {
+export function McpPanel({ events, profiles, mcpUrl, mcpToken, mcpError, onSettings }: Props): JSX.Element {
   const profilesById = useMemo(() => new Map(profiles.map((p) => [p.id, p])), [profiles]);
   const recent = useMemo(() => events.slice().reverse(), [events]);
 
@@ -35,7 +37,7 @@ export function McpPanel({ events, profiles, mcpUrl, mcpToken }: Props): JSX.Ele
           and read pages through it — every tool call streams into the feed below.
         </div>
 
-        <ConnectCard baseUrl={mcpUrl} token={mcpToken} />
+        <ConnectCard baseUrl={mcpUrl} token={mcpToken} error={mcpError} onSettings={onSettings} />
 
         {/* Live feed */}
         <div className="flex items-baseline gap-2.5 mt-7 mb-2.5">
@@ -79,11 +81,15 @@ export function McpPanel({ events, profiles, mcpUrl, mcpToken }: Props): JSX.Ele
 function ConnectCard({
   baseUrl,
   token,
+  error,
+  onSettings,
 }: {
   baseUrl: string | null;
   token: string | null;
+  error?: string;
+  onSettings: () => void;
 }): JSX.Element {
-  const off = baseUrl === null;
+  const off = !baseUrl || !!error;
   const base = (baseUrl ?? "http://127.0.0.1:7777").replace(/\/$/, "");
   const httpUrl = `${base}/mcp`; // Streamable HTTP — the current MCP transport
   const sseUrl = `${base}/sse`; // legacy HTTP+SSE, kept for older clients
@@ -177,7 +183,7 @@ function ConnectCard({
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {!off && <CopyPromptButton prompt={llmPrompt} />}
           {off ? (
-            <Pill kind="idle">server off</Pill>
+            <Pill kind={error ? "error" : "idle"}>{error ? "server unavailable" : "server off"}</Pill>
           ) : (
             <Pill kind="running" dot>listening</Pill>
           )}
@@ -185,11 +191,12 @@ function ConnectCard({
       </div>
 
       {off ? (
-        <div className="text-[12px] text-slate-400 leading-relaxed">
-          The MCP server is disabled. Turn on{" "}
-          <span className="text-slate-200 font-medium">Auto-start MCP HTTP transport</span> in{" "}
-          <span className="text-slate-200 font-medium">Settings</span> to get a connection
-          endpoint.
+        <div className="space-y-2 break-words text-[12px] text-slate-400 leading-relaxed">
+          {error ? <div role="alert" className="text-red-300">
+            <p>MCP could not start: {error}</p>
+            <p className="mt-1">Profiles are still available. Choose another MCP port or disable auto-start in Settings, then restart Cloaksession.</p>
+          </div> : <p>The MCP server is disabled. Enable Auto-start MCP HTTP transport in Settings, then restart Cloaksession.</p>}
+          <button type="button" onClick={onSettings} className="btn-secondary rounded-lg px-3 py-2">Configure MCP in Settings</button>
         </div>
       ) : (
         <>

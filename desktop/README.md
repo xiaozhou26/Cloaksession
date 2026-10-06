@@ -1,10 +1,17 @@
-# Wails desktop host
+# Wails desktop
 
-The Go host owns the desktop window, native file dialogs, and the Rust `desktop-core` subprocess. React calls `main.App.Invoke`; commands and events cross a private JSON-lines stdin/stdout channel. The core's stderr is reserved for logs. The host closes stdin on exit and waits for the core to stop managed browsers.
+Cloaksession 1.4.0 uses Go for the complete application backend. Wails owns the desktop window and native dialogs, and `App.Invoke` calls the in-process `Service`. No Rust executable or Cargo toolchain is needed.
 
-## Build and development
+## Components
 
-From the repository root:
+- `internal/store`: pure-Go SQLite, Profile/settings compatibility, fingerprint catalogs, encrypted `.mzar` archives.
+- `internal/browser`: browser processes, proxy forwarding, CDP connections and automation. Chromix uses the bundled direct Playwright bridge.
+- `internal/extensions`: CRX/ZIP/folder installation, shared cache, icons, and companion signals.
+- `internal/mcp`: authenticated loopback HTTP JSON-RPC, tool catalog and activity events.
+- `service.go`: desktop command dispatch and lifecycle coordination.
+- `resources/playwright`: Node bridge and pinned `playwright-core` dependency.
+
+## Build and develop
 
 ```sh
 python3 scripts/build.py --prepare
@@ -12,33 +19,26 @@ cd desktop
 GOTOOLCHAIN=go1.23.12 go run github.com/wailsapp/wails/v2/cmd/wails@v2.11.0 dev
 ```
 
-Build complete distributable artifacts using `python3 scripts/build.py --package`. On macOS, add `--universal` for both Apple Silicon and Intel. The build script stages the Rust executable and Node runtime resources together with the Wails executable.
+From the repository root, `python3 scripts/build.py --package` builds the platform package. Add `--universal` on macOS for Apple Silicon and Intel. Wails 2.11 tooling is pinned to Go 1.23.12 in CI.
 
-Wails 2.11's build tooling is verified with Go 1.23.12. A newer Go installation can select that toolchain using `GOTOOLCHAIN=go1.23.12`.
+Node.js 20+ is required when using the direct Playwright browser path. Browser executables remain locally supplied. Go controls the application and CDP operations; JavaScript remains the frontend and Playwright adapter language.
 
-## Runtime paths
+## Compatibility and paths
 
-The data directory keeps the existing `com.cloaksession.browser` identifier:
+Existing `com.cloaksession.browser` data locations, SQLite schema, settings keys, engine user directories and MCP tokens are retained. `CLOAKSESSION_DATA_DIR` and `CLOAKSESSION_RESOURCE_DIR` provide isolated test/development overrides. Wails WebView preferences may differ from older desktop shells; Profile persistence is independent of WebView localStorage.
 
-- Windows: `%LOCALAPPDATA%\com.cloaksession.browser`
-- macOS: `~/Library/Application Support/com.cloaksession.browser`
-- Linux: `$XDG_DATA_HOME/com.cloaksession.browser`, or `~/.local/share/com.cloaksession.browser`
+Packaged Node resources live in `Contents/Resources/playwright` on macOS and adjacent `resources/playwright` on Windows/Linux. The browser-core process used by 1.3.0 is removed.
 
-`CLOAKSESSION_DATA_DIR`, `CLOAKSESSION_CORE_BINARY`, and `CLOAKSESSION_RESOURCE_DIR` override paths for isolated development and tests. Packaged builds load `desktop-core` beside the application executable. macOS resources live in `Contents/Resources`; Windows and Linux use the adjacent `resources` directory.
-
-## Tests
-
-Build frontend assets before testing the Go package because they are embedded at compile time:
+## Verify
 
 ```sh
 npm --prefix desktop/frontend ci --legacy-peer-deps
 npm --prefix desktop/frontend run build
-cargo build --locked -p desktop-core
+npm --prefix desktop/resources/playwright ci
 cd desktop
-go test -race ./...
-CLOAKSESSION_TEST_CORE="$PWD/../target/debug/desktop-core" \
-  CLOAKSESSION_RESOURCE_DIR="$PWD/../crates/desktop-core/resources" \
-  go test -race -run TestRealCoreRoundTrip -v
+GOTOOLCHAIN=go1.23.12 go test -race ./...
+CLOAKSESSION_TEST_BROWSER="/absolute/path/to/chromium" \
+  GOTOOLCHAIN=go1.23.12 go test -race -count=1 ./...
 ```
 
-The real-core test uses a temporary data directory with MCP and automatic updates disabled. It verifies commands, Profile creation/update/deletion, encrypted archive export/import through host dialog requests, errors, and process shutdown.
+`testdata/legacy-rust-profile.mzar` is a synthetic old-format archive for cross-version import testing. It contains no user data or real credentials.

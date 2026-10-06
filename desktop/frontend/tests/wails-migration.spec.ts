@@ -55,7 +55,7 @@ test("real bridge preserves decoded Go values, argument objects, and error messa
   expect(result.synchronous).toBe("Synchronous host failure");
 });
 
-test("public IPC command namespaces keep their names and argument shapes", async ({ page }) => {
+test("all 37 public IPC command names and argument shapes remain compatible", async ({ page }) => {
   await openProfiles(page);
   const calls = await page.evaluate(async () => {
     const modulePath = "/src/lib/ipc.ts";
@@ -102,10 +102,11 @@ test("public IPC command namespaces keep their names and argument shapes", async
       await ipc.update.lastChecked();
       await ipc.update.check();
       await ipc.update.install();
-      await ipc.update.download("1.3.0");
+      await ipc.update.download("1.4.0");
       return calls;
     } finally { app.Invoke = original; }
   });
+  expect(new Set((calls as [string, unknown][]).map(([command]) => command)).size).toBe(37);
   expect(calls).toEqual([
     ["profiles_list", {}], ["profiles_get", { id: "id" }],
     ["profiles_create", { input: { name: "New", tags: ["a"] } }],
@@ -126,7 +127,7 @@ test("public IPC command namespaces keep their names and argument shapes", async
     ["extensions_store_entries", {}], ["extensions_prepare_from_web_store", { urlOrId: "url" }],
     ["extensions_prepare_from_file", {}], ["extensions_prepare_from_folder", {}], ["extensions_icon", { ext: { id: "ext" }, profileId: null }],
     ...["status", "last_checked", "check", "install"].map((action) => [`update_${action}`, {}]),
-    ["update_download", { version: "1.3.0" }],
+    ["update_download", { version: "1.4.0" }],
   ]);
 });
 
@@ -294,12 +295,12 @@ test("MCP config, live event replacement, profile refresh and update banners use
   await expect(page.getByText("MCP profile created", { exact: true })).toHaveCount(1);
   await expect(page.getByText("1 total", { exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).__WAILS_MOCK__.calls.filter((c: string) => c === "profiles_list").length)).toBeGreaterThan(before);
-  await emit(page, "update:status", { status: { kind: "available", version: "1.4.0" } });
-  await expect(page.getByText("Cloaksession 1.4.0 is available.")).toBeVisible();
+  await emit(page, "update:status", { status: { kind: "available", version: "1.5.0" } });
+  await expect(page.getByText("Cloaksession 1.5.0 is available.")).toBeVisible();
   await page.getByRole("button", { name: "Download", exact: true }).click();
-  await expect.poll(() => page.evaluate(() => (window as any).__WAILS_MOCK__.invocations.at(-1))).toEqual({ command: "update_download", args: { version: "1.4.0" } });
+  await expect.poll(() => page.evaluate(() => (window as any).__WAILS_MOCK__.invocations.at(-1))).toEqual({ command: "update_download", args: { version: "1.5.0" } });
   await page.getByRole("button", { name: "Dismiss", exact: true }).click();
-  await expect(page.getByText("Cloaksession 1.4.0 is available.")).toHaveCount(0);
+  await expect(page.getByText("Cloaksession 1.5.0 is available.")).toHaveCount(0);
 });
 
 test("StrictMode and shared view navigation do not leak Wails listeners", async ({ page }) => {
@@ -310,7 +311,7 @@ test("StrictMode and shared view navigation do not leak Wails listeners", async 
   }
   for (let i = 0; i < 3; i++) {
     await page.getByTitle("Settings · ⌘,", { exact: true }).click();
-    await expect(page.getByText("Cloaksession v1.3.0 · macos · Wails v2", { exact: true })).toBeVisible();
+    await expect(page.getByText("Cloaksession v1.4.0 · macos · Wails v2", { exact: true })).toBeVisible();
     await expect.poll(() => count("update:status")).toBe(2);
     await page.getByTitle("Profiles · ⌘1", { exact: true }).click();
     await expect.poll(() => count("update:status")).toBe(1);
@@ -351,4 +352,104 @@ test("onboarding create errors retain the name and allow retry without completin
   expect(await page.evaluate(() => localStorage.getItem("multizen.ui.onboarded"))).toBeNull();
   await page.getByRole("button", { name: "Create profile", exact: true }).click();
   await expect(page.getByRole("button", { name: /Keep onboarding draft/ })).toBeVisible();
+});
+
+for (const command of ["profiles_list", "system_info", "activity_recent"]) {
+  test(`startup ${command} failure is visible and retry restores the app without leaked listeners`, async ({ page }) => {
+    await installWailsMock(page, defaultSettings, {
+      section: "profiles",
+      startupFailures: { [command]: "Go service is not ready" },
+    });
+    await page.goto("/");
+    await expect(page.getByRole("alert")).toContainText("Could not initialize Cloaksession: Go service is not ready");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await page.evaluate(() => { (window as any).__WAILS_MOCK__.startupFailures = {}; });
+    await page.getByRole("button", { name: "Retry connection", exact: true }).click();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Regression profile/ })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as any).__WAILS_MOCK__.listenerCount("activity:event"))).toBe(1);
+    await expect.poll(() => page.evaluate(() => (window as any).__WAILS_MOCK__.listenerCount("profiles:running-changed"))).toBe(1);
+  });
+}
+
+for (const command of ["settings_get", "system_info", "update_status", "update_last_checked"]) {
+  test(`settings startup ${command} failure is visible and recoverable`, async ({ page }) => {
+    await installWailsMock(page, defaultSettings, { startupFailures: { [command]: "Go settings unavailable" } });
+    await page.goto("/");
+    await expect(page.getByRole("alert").filter({ hasText: "Could not load settings:" })).toContainText("Go settings unavailable");
+    await page.evaluate(() => { (window as any).__WAILS_MOCK__.startupFailures = {}; });
+    await page.getByRole("button", { name: "Retry settings", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Settings", exact: true })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "Could not load settings:" })).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => (window as any).__WAILS_MOCK__.listenerCount("update:status"))).toBe(2);
+    await expect(page.getByText("Cloaksession v1.4.0 · macos · Wails v2", { exact: true })).toBeVisible();
+  });
+}
+
+test("startup errors remain visible before onboarding completes", async ({ page }) => {
+  await installWailsMock(page, defaultSettings, { onboarded: false, empty: true, startupFailures: { system_info: "Service startup failed" } });
+  await page.goto("/");
+  await expect(page.getByRole("alert").filter({ hasText: "Could not initialize Cloaksession:" })).toContainText("Service startup failed");
+  await page.evaluate(() => { (window as any).__WAILS_MOCK__.startupFailures = {}; });
+  await page.getByRole("button", { name: "Retry connection", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("multizen.ui.onboarded"))).toBeNull();
+});
+
+test("optional MCP port conflict stays visible while profiles and settings remain usable", async ({ page }) => {
+  const conflict = "listen tcp 127.0.0.1:7777: bind: address already in use";
+  await installWailsMock(page, defaultSettings, { section: "mcp", mcpError: conflict });
+  await page.goto("/");
+  await expect(page.getByRole("alert")).toContainText(`MCP could not start: ${conflict}`);
+  await expect(page.getByText("server unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("listening", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Copy for LLM", exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Could not initialize Cloaksession:/)).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize()!.width);
+
+  await page.getByTitle("Profiles · ⌘1", { exact: true }).click();
+  await page.getByRole("button", { name: "Launch", exact: true }).click();
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await page.getByRole("button", { name: /Regression profile/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByTitle("MCP · ⌘2", { exact: true }).click();
+  await page.getByRole("button", { name: "Configure MCP in Settings", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText(conflict);
+  await expect(page.getByText("unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy URL", exact: true })).toHaveCount(0);
+  await expect(page.getByText(/^running on :/)).toHaveCount(0);
+  const port = page.getByLabel("MCP HTTP port", { exact: true });
+  const savePort = page.getByRole("button", { name: "Save MCP port", exact: true });
+  for (const invalid of ["", "0", "65536", "1.5", "abc"]) {
+    await port.fill(invalid);
+    await expect(port).toHaveAttribute("aria-invalid", "true");
+    await expect(savePort).toBeDisabled();
+    expect((await storedSettings(page)).mcpHttpPort).toBe(7777);
+  }
+  await port.fill("7788");
+  await savePort.click();
+  await expect.poll(async () => (await storedSettings(page)).mcpHttpPort).toBe(7788);
+  await expect(page.getByRole("alert")).toContainText(conflict);
+  await expect(page.getByText(/changes apply after restarting Cloaksession, not immediately/)).toBeVisible();
+  await page.getByRole("checkbox", { name: "Auto-start MCP HTTP transport on app launch", exact: true }).uncheck();
+  await expect.poll(async () => (await storedSettings(page)).mcpHttpEnabled).toBe(false);
+  await expect(page.getByRole("alert")).toContainText(conflict);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize()!.width);
+  await page.getByTitle("MCP · ⌘2", { exact: true }).click();
+  await expect(page.getByText("server unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("listening", { exact: true })).toHaveCount(0);
+});
+
+test("saving a new MCP port does not mislabel the currently running endpoint", async ({ page }) => {
+  await installWailsMock(page);
+  await page.goto("/");
+  await expect(page.getByText("running on :7777", { exact: true })).toBeVisible();
+  await page.getByLabel("MCP HTTP port", { exact: true }).fill("7788");
+  await page.getByRole("button", { name: "Save MCP port", exact: true }).click();
+  await expect.poll(async () => (await storedSettings(page)).mcpHttpPort).toBe(7788);
+  await expect(page.getByText("running on :7777", { exact: true })).toBeVisible();
+  await expect(page.getByText("running on :7788", { exact: true })).toHaveCount(0);
+  await page.getByTitle("MCP · ⌘2", { exact: true }).click();
+  await expect(page.locator("pre").filter({ hasText: "[mcp_servers.multizen]" })).toContainText('url = "http://127.0.0.1:7777/mcp"');
 });

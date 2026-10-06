@@ -57,13 +57,14 @@ Function EnsureAppClosed
     StrCmp $1 -1 busy
     System::Call 'kernel32::CloseHandle(p r1)'
   check_core:
+    ; A previous installation may still have its retired helper running.
     IfFileExists "$INSTDIR\desktop-core.exe" 0 done
     System::Call 'kernel32::CreateFileW(w "$INSTDIR\desktop-core.exe", i 0x40000000, i 0, p 0, i 3, i 0, p 0) p.r1'
     StrCmp $1 -1 busy
     System::Call 'kernel32::CloseHandle(p r1)'
     Goto done
   busy:
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Close all browser sessions and fully exit Cloaksession before updating. If an executable is still locked, wait for desktop-core.exe to exit or close it in Task Manager. Check that the install folder is writable, then click Retry. Cancel leaves the installed files unchanged." /SD IDCANCEL IDRETRY check
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Close all browser sessions and fully exit Cloaksession before updating. If an executable is still locked, wait for the application and any previous-version helper to exit or close them in Task Manager. Check that the install folder is writable, then click Retry. Cancel leaves the installed files unchanged." /SD IDCANCEL IDRETRY check
     Abort
   done:
 FunctionEnd
@@ -72,13 +73,17 @@ Section "Cloaksession" SEC_MAIN
   Call EnsureAppClosed
   SetOutPath "$INSTDIR"
   File "${PAYLOAD}\Cloaksession.exe"
-  File "${PAYLOAD}\desktop-core.exe"
+  Delete "$INSTDIR\desktop-core.exe"
   SetOutPath "$INSTDIR\resources"
   File "${PAYLOAD}\resources\LICENSE"
   ; Replace runtime dependencies, never the separate user data directory.
   RMDir /r "$INSTDIR\resources\chromix"
-  SetOutPath "$INSTDIR\resources\chromix"
-  File /r "${PAYLOAD}\resources\chromix\*.*"
+  RMDir /r "$INSTDIR\resources\playwright"
+  SetOutPath "$INSTDIR\resources\playwright"
+  File /r "${PAYLOAD}\resources\playwright\*.*"
+  RMDir /r "$INSTDIR\resources\companion"
+  SetOutPath "$INSTDIR\resources\companion"
+  File /r "${PAYLOAD}\resources\companion\*.*"
   SetOutPath "$INSTDIR"
   WriteUninstaller "$INSTDIR\uninstall.exe"
   CreateShortcut "$SMPROGRAMS\Cloaksession.lnk" "$INSTDIR\Cloaksession.exe"
@@ -107,6 +112,8 @@ Section "Uninstall"
   Delete "$INSTDIR\desktop-core.exe"
   Delete "$INSTDIR\resources\LICENSE"
   RMDir /r "$INSTDIR\resources\chromix"
+  RMDir /r "$INSTDIR\resources\playwright"
+  RMDir /r "$INSTDIR\resources\companion"
   RMDir "$INSTDIR\resources"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"

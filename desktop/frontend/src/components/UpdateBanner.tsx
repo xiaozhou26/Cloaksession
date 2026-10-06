@@ -23,11 +23,14 @@ export function UpdateBanner({ suppressed }: { suppressed?: boolean }): JSX.Elem
   useEffect(() => {
     let unlisten = (): void => {};
     let active = true;
-    void update.status().then(setStatus);
+    const failed = (error: unknown): void => {
+      if (active) setStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    };
+    void update.status().then(setStatus).catch(failed);
     void onUpdateStatus(setStatus).then((fn) => {
       if (active) unlisten = fn;
       else fn();
-    });
+    }).catch(failed);
     return () => {
       active = false;
       unlisten();
