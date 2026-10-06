@@ -42,6 +42,14 @@
 
 `GOTOOLCHAIN=go1.23.12 python3 scripts/build.py --package --universal` 已实际完成 1.4.0 macOS 双架构构建，主程序 `lipo` 与完整包签名校验通过，包中不再包含 Rust 核心。Windows/Linux 本机仅验证 Go 后端交叉编译及打包契约，平台 Wails 构建由发布 CI 验证。
 
+## 实际 Chromix 启动回归（2026-10-06）
+
+使用本机 `/Users/a/Downloads/chromix 2/chromix`，内核报告 `Chrome/154.0.8037.57`，以隔离数据目录测试。原 1.4.1 在模拟 Finder 的 `PATH=/usr/bin:/bin:/usr/sbin:/sbin` 下，通过 Wails 页面点击 Launch 可复现 `node: executable file not found in $PATH`。填写 `/opt/homebrew/bin/node` 后同一内核可正常启动和关闭。
+
+新增 Node 可执行文件解析后，保持 `nodePath: node` 和精简 PATH，实际有窗口的 Chromix 在 Wails 中启动/停止通过。`CLOAKSESSION_TEST_CHROMIX` 控制的 `TestChromixDesktopLaunch` 对 random/fixed/custom 分别执行有窗口启动、输入、点击、CDP 版本查询和关闭，全部通过。完整 Go race/vet 及以真实 Chromix 替换普通 Chrome 的浏览器测试通过。
+
+这些测试验证启动和操作链路，不把启动成功等同于全部自定义指纹参数生效；此内核的独立 smoke 中硬件与 quota 观测值未逐项等于请求值。Node 路径修复纳入 v1.4.2；v1.4.1 附件不包含它。发布状态以 v1.4.2 的 GitHub Actions 结果为准。
+
 ## 必须完成的目标机器验收
 
 1. 关闭旧应用与所有 Profile，备份完整数据目录；用副本验证旧 SQLite、设置、MCP token、未知字段、Profile 数据及扩展均保留。

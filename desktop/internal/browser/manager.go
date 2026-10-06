@@ -140,13 +140,19 @@ func (m *Manager) Launch(profile map[string]any, settings map[string]any, compan
 			h.bridge.Close()
 			return nil, e
 		}
-		h.cmd = exec.Command(text(config, "nodePath", "node"), script)
-		h.cmd.Env = os.Environ()
+		env := os.Environ()
 		for key, v := range obj(config["environment"]) {
 			if s, ok := v.(string); ok {
-				h.cmd.Env = append(h.cmd.Env, key+"="+s)
+				env = append(env, key+"="+s)
 			}
 		}
+		nodePath, e := resolveNodeExecutable(text(config, "nodePath", "node"), env)
+		if e != nil {
+			h.bridge.Close()
+			return nil, e
+		}
+		h.cmd = exec.Command(nodePath, script)
+		h.cmd.Env = env
 		h.stdin, e = h.cmd.StdinPipe()
 		if e != nil {
 			h.bridge.Close()

@@ -114,7 +114,7 @@ export async function installWailsMock(
               localStorage.setItem(key, JSON.stringify(next));
               return next;
             }
-            case "system_info": return { mcpHttpUrl: runtimeSettings.mcpHttpEnabled && !options.mcpError ? `http://127.0.0.1:${runtimeSettings.mcpHttpPort}` : "", mcpError: options.mcpError, mcpAuthToken: "fixture-token-not-secret", appVersion: "1.4.1", platform: "macos" };
+            case "system_info": return { mcpHttpUrl: runtimeSettings.mcpHttpEnabled && !options.mcpError ? `http://127.0.0.1:${runtimeSettings.mcpHttpPort}` : "", mcpError: options.mcpError, mcpAuthToken: "fixture-token-not-secret", appVersion: "1.4.2", platform: "macos" };
             case "profiles_list": return mock.profiles().map((current) => ({ ...current, isRunning: running.has(current.id), timezone: current.fingerprint.timezone }));
             case "profiles_get": return mock.profiles().find((current) => current.id === args.id) ?? null;
             case "profiles_create": {
