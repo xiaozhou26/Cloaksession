@@ -1,18 +1,18 @@
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use multizen_core::{ChromixSettings, MultizenError, Profile, Result};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-const START_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const START_TIMEOUT: Duration = Duration::from_secs(120);
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(12);
 
 pub(crate) struct ChromixProcess {
@@ -96,7 +96,94 @@ fn request(
         "proxy": proxy,
         "extensionPaths": extensions,
         "startUrl": profile.start_url,
+        "profileId": profile.id,
+        "fingerprint": profile.fingerprint,
     })
+}
+
+/// Resolve proxy precedence before adapting authenticated SOCKS to loopback.
+async fn bridge_proxy(request: &mut Value) -> Result<Option<crate::socks5_bridge::Socks5Bridge>> {
+    let mut pointer = "/proxy";
+    let mut explicit = false;
+    let mut raw_proxy = false;
+    for path in [
+        "/options",
+        "/options/launchOptions",
+        "/options/contextOptions",
+    ] {
+        if let Some(layer) = request.pointer(path) {
+            if layer.get("proxy").is_some() {
+                pointer = match path {
+                    "/options" => "/options/proxy",
+                    "/options/launchOptions" => "/options/launchOptions/proxy",
+                    _ => "/options/contextOptions/proxy",
+                };
+                explicit = true;
+            }
+            raw_proxy |= layer["args"].as_array().is_some_and(|args| {
+                args.iter().any(|arg| {
+                    arg.as_str().is_some_and(|arg| {
+                        let key = arg.trim().split(['=', ' ']).next().unwrap_or("");
+                        matches!(
+                            key,
+                            "--proxy-server" | "--proxy-pac-url" | "--no-proxy-server"
+                        )
+                    })
+                })
+            });
+        }
+    }
+    if raw_proxy && !explicit {
+        return Ok(None);
+    }
+    let Some(proxy) = request.pointer(pointer) else {
+        return Ok(None);
+    };
+    let server = proxy.as_str().or_else(|| proxy["server"].as_str());
+    let Some(server) = server else {
+        return Ok(None);
+    };
+    let Ok(url) = reqwest::Url::parse(server) else {
+        return Ok(None);
+    };
+    if url.scheme() != "socks5" {
+        return Ok(None);
+    }
+    let username = proxy["username"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(url.username());
+    let password = proxy["password"]
+        .as_str()
+        .or_else(|| url.password())
+        .unwrap_or("");
+    if username.is_empty() && password.is_empty() {
+        return Ok(None);
+    }
+    // URL credentials must not be mistaken for their percent-encoded spelling.
+    if (proxy.is_string() || !url.username().is_empty())
+        && (username.contains('%') || password.contains('%'))
+    {
+        return Err(launch_error("For SOCKS5 URL credentials containing escapes, use a proxy object with decoded username/password fields"));
+    }
+    let upstream = multizen_core::ProxyConfig {
+        proxy_type: "socks5".into(),
+        host: url
+            .host_str()
+            .ok_or_else(|| launch_error("SOCKS5 proxy requires a host"))?
+            .trim_matches(['[', ']'])
+            .into(),
+        port: url.port().unwrap_or(1080),
+        username: Some(username.into()),
+        password: Some(password.into()),
+    };
+    let (bridge, port) = crate::socks5_bridge::Socks5Bridge::start(upstream).await?;
+    let mut replacement = json!({"server": format!("socks5://127.0.0.1:{port}")});
+    if let Some(bypass) = proxy.get("bypass") {
+        replacement["bypass"] = bypass.clone();
+    }
+    *request.pointer_mut(pointer).unwrap() = replacement;
+    Ok(Some(bridge))
 }
 
 async fn shutdown(child: &mut Child, input: &mut Option<ChildStdin>) {
@@ -116,6 +203,8 @@ async fn shutdown(child: &mut Child, input: &mut Option<ChildStdin>) {
         if let Some(pid) = child.id() {
             let _ = Command::new("/bin/kill")
                 .args(["-TERM", &pid.to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
                 .status()
                 .await;
             if tokio::time::timeout(CLOSE_TIMEOUT, child.wait())
@@ -129,6 +218,8 @@ async fn shutdown(child: &mut Child, input: &mut Option<ChildStdin>) {
         if let Some(pid) = child.id() {
             let _ = Command::new("taskkill")
                 .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
                 .status()
                 .await;
         }
@@ -157,14 +248,16 @@ pub(crate) async fn start(
         .map_err(launch_error)?;
     let port = reservation.local_addr().map_err(launch_error)?.port();
     let endpoint = format!("http://127.0.0.1:{port}");
-    let mut payload = serde_json::to_vec(&request(
+    let mut launch_request = request(
         profile,
         binary_path,
         companion_dir,
         config,
         port,
         skip_download,
-    ))?;
+    );
+    let proxy_bridge = bridge_proxy(&mut launch_request).await?;
+    let mut payload = serde_json::to_vec(&launch_request)?;
     payload.push(b'\n');
     let mut command = Command::new(&config.node_path);
     command
@@ -207,7 +300,7 @@ pub(crate) async fn start(
                 .next_line()
                 .await
                 .map_err(launch_error)?
-                .ok_or_else(|| launch_error("bridge exited before ready; see SDK stderr"))?;
+                .ok_or_else(|| launch_error("bridge exited before ready; see Playwright stderr"))?;
             let event: Value = serde_json::from_str(&line).map_err(|_| {
                 launch_error("invalid bridge ready JSON; stdout is reserved for control")
             })?;
@@ -216,7 +309,9 @@ pub(crate) async fn start(
                     Ok(())
                 }
                 Some("error") => Err(launch_error(
-                    event["message"].as_str().unwrap_or("SDK launch failed"),
+                    event["message"]
+                        .as_str()
+                        .unwrap_or("Playwright launch failed"),
                 )),
                 _ => Err(launch_error(
                     "bridge closed or returned an unexpected CDP endpoint before ready",
@@ -225,7 +320,7 @@ pub(crate) async fn start(
         };
         let result = tokio::select! {
             result = tokio::time::timeout(START_TIMEOUT, startup) => {
-                result.unwrap_or_else(|_| Err(launch_error("startup timed out after 15 minutes (including SDK download)")))
+                result.unwrap_or_else(|_| Err(launch_error("startup timed out after 120 seconds; check the local browser executable")))
             }
             _ = &mut close_rx => Err(launch_error("launch cancelled")),
         };
@@ -252,6 +347,9 @@ pub(crate) async fn start(
         }
         running.store(false, Ordering::Release);
         shutdown(&mut child, &mut input).await;
+        if let Some(bridge) = proxy_bridge {
+            let _ = bridge.stop().await;
+        }
     });
     let process = ChromixProcess {
         close: Some(close_tx),

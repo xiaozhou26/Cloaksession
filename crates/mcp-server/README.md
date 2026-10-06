@@ -44,7 +44,7 @@ so they apply regardless of which `BrowserDriver` implementation is plugged in:
 
 `mcp-server` does **not** depend on a concrete browser backend. It defines a
 `BrowserDriver` trait (`crates/mcp-server/src/driver.rs`) that the
-`tauri-app` crate (Plan 4) implements and injects at wiring time. A
+`desktop-core` crate implements and injects at wiring time. A
 `MockBrowserDriver` is provided for tests so the crate's test suite runs
 without a real Chromium.
 
@@ -58,6 +58,6 @@ without a real Chromium.
 
 ## Running
 
-The crate is a library; it is launched by the `tauri-app` binary (Plan 4)
-which constructs the axum router, wires the `BrowserDriver`, and binds the
-listener. See the `tauri-app` crate for the full startup path.
+The crate is a library; the `desktop-core` subprocess constructs the axum router,
+wires the `BrowserDriver`, and binds the listener. The Wails host owns that process.
+See the `desktop-core` crate for the full startup path.

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Cloaksession",
+  "outputfilename": "Cloaksession",
+  "frontend:install": "npm ci --legacy-peer-deps",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev -- --host 127.0.0.1",
+  "frontend:dev:serverUrl": "auto",
+  "author": { "name": "Cloaksession contributors" },
+  "info": {
+    "companyName": "Cloaksession",
+    "productName": "Cloaksession",
+    "productVersion": "1.3.0",
+    "copyright": "Copyright 2026 Cloaksession contributors",
+    "comments": "Isolated browser session manager"
+  }
+}

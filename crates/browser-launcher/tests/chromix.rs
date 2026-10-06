@@ -5,7 +5,7 @@ use std::time::Duration;
 use browser_launcher::BrowserLauncher;
 use multizen_core::{BrowserEngine, ChromixSettings, CreateProfileInput, Profile, ProxyConfig};
 use profile_manager::ProfileManager;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tempfile::TempDir;
 
 struct Fixture {
@@ -19,8 +19,8 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let directory = TempDir::new().unwrap();
-        let bridge =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tauri-app/resources/chromix/bridge.mjs");
+        let bridge = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../desktop-core/resources/chromix/bridge.mjs");
         let bridge_url = format!(
             "file://{}",
             std::fs::canonicalize(bridge).unwrap().display()
@@ -45,17 +45,18 @@ await runBridge({
     const timer = setTimeout(resolve, Number(process.env.READY_DELAY || 0));
     signal.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('cancelled')); });
   }),
-  loadSdk: async () => ({
-    launchPersistentContext: async (options) => {
+  loadPlaywright: async () => ({ chromium: {
+    executablePath: () => process.execPath,
+    launchPersistentContext: async (userDataDir, options) => {
       writeFileSync(process.env.CAPTURE_FILE, JSON.stringify({
-        options, argv: process.argv, secret: process.env.BRIDGE_SECRET,
+        options, userDataDir, argv: process.argv, secret: process.env.BRIDGE_SECRET,
       }));
-      console.log('fake SDK log goes to stderr');
-      if (process.env.FAIL_LAUNCH) throw new Error('intentional fake SDK failure');
+      console.log('fake Playwright log goes to stderr');
+      if (process.env.FAIL_LAUNCH) throw new Error('intentional fake Playwright failure');
       if (process.env.CLOSE_AFTER) setTimeout(() => context.emit('close'), Number(process.env.CLOSE_AFTER));
       return context;
     },
-  }),
+  } }),
   forceExit: (code) => process.exit(code),
 });
 process.exit(0);
@@ -72,7 +73,7 @@ process.exit(0);
         );
         let profile = pm
             .create(CreateProfileInput {
-                name: "Chromix fake SDK".into(),
+                name: "Chromix fake Playwright".into(),
                 proxy: Some(ProxyConfig {
                     proxy_type: "http".into(),
                     host: "proxy.invalid".into(),
@@ -130,8 +131,8 @@ process.exit(0);
 async fn persistent_launch_preserves_options_and_keeps_secrets_off_argv() {
     let mut fixture = Fixture::new();
     fixture.config.options = json!({
-        "futureSdkField": {"opaque": [true, null, "kept"]},
-        "humanConfig": {"seed": 17, "custom": "preserved"},
+        "fingerprintMode": "fixed",
+        "fingerprintSeed": "18446744073709551615",
         "launchOptions": {"slowMo": 2},
         "contextOptions": {"permissions": ["clipboard-read"]},
     })
@@ -151,39 +152,39 @@ async fn persistent_launch_preserves_options_and_keeps_secrets_off_argv() {
         .await
         .unwrap();
     assert!(fixture.launcher.is_running_async(&fixture.profile.id).await);
-    assert!(
-        fixture
-            .pm
-            .get(&fixture.profile.id)
-            .unwrap()
-            .unwrap()
-            .last_opened_at
-            .is_some()
-    );
+    assert!(fixture
+        .pm
+        .get(&fixture.profile.id)
+        .unwrap()
+        .unwrap()
+        .last_opened_at
+        .is_some());
     let captured = fixture.capture();
     assert_eq!(
-        captured["options"]["userDataDir"],
+        captured["userDataDir"],
         json!(PathBuf::from(&fixture.profile.data_dir).join("engines/chromix"))
     );
-    for (key, value) in &fixture.config.options {
-        assert_eq!(&captured["options"][key], value);
-    }
+    assert_eq!(captured["options"]["slowMo"], 2);
+    assert_eq!(
+        captured["options"]["permissions"],
+        json!(["clipboard-read"])
+    );
     assert_eq!(captured["options"]["proxy"]["password"], "private-password");
     assert_eq!(captured["secret"], "private-env-token");
     let argv = captured["argv"].as_array().unwrap();
     assert_eq!(argv.len(), 2);
-    assert!(
-        argv.iter()
-            .all(|value| !value.as_str().unwrap().contains("private-"))
-    );
+    assert!(argv
+        .iter()
+        .all(|value| !value.as_str().unwrap().contains("private-")));
     let port = launched.cdp_endpoint.rsplit(':').next().unwrap();
-    assert_eq!(
-        captured["options"]["args"],
-        json!([
-            "--remote-debugging-address=127.0.0.1",
-            format!("--remote-debugging-port={port}"),
-        ])
-    );
+    let args = captured["options"]["args"].as_array().unwrap();
+    assert!(args.contains(&json!("--remote-debugging-address=127.0.0.1")));
+    assert!(args.contains(&json!(format!("--remote-debugging-port={port}"))));
+    assert!(args.contains(&json!("--fingerprint=18446744073709551615")));
+    assert!(!args.iter().any(|arg| arg
+        .as_str()
+        .unwrap()
+        .starts_with("--fingerprint-screen-width=")));
     assert_eq!(captured["options"].get("geoip"), None);
     let again = fixture
         .launcher
@@ -227,21 +228,19 @@ async fn running_registry_waits_for_the_ready_handshake() {
         _ = tokio::time::sleep(Duration::from_millis(50)) => {},
     }
     assert!(!fixture.launcher.is_running_async(&fixture.profile.id).await);
-    assert!(
-        fixture
-            .pm
-            .get(&fixture.profile.id)
-            .unwrap()
-            .unwrap()
-            .last_opened_at
-            .is_none()
-    );
+    assert!(fixture
+        .pm
+        .get(&fixture.profile.id)
+        .unwrap()
+        .unwrap()
+        .last_opened_at
+        .is_none());
     launch.await.unwrap();
     fixture.launcher.close_all().await;
 }
 
 #[tokio::test]
-async fn sdk_failure_never_marks_the_profile_running_or_opened() {
+async fn playwright_failure_never_marks_the_profile_running_or_opened() {
     let mut fixture = Fixture::new();
     fixture
         .config
@@ -259,21 +258,21 @@ async fn sdk_failure_never_marks_the_profile_running_or_opened() {
         )
         .await
         .unwrap_err();
-    assert!(error.to_string().contains("intentional fake SDK failure"));
+    assert!(error
+        .to_string()
+        .contains("intentional fake Playwright failure"));
     assert!(!fixture.launcher.is_running_async(&fixture.profile.id).await);
-    assert!(
-        fixture
-            .pm
-            .get(&fixture.profile.id)
-            .unwrap()
-            .unwrap()
-            .last_opened_at
-            .is_none()
-    );
+    assert!(fixture
+        .pm
+        .get(&fixture.profile.id)
+        .unwrap()
+        .unwrap()
+        .last_opened_at
+        .is_none());
 }
 
 #[tokio::test]
-async fn cancelling_startup_closes_the_inflight_sdk_context() {
+async fn cancelling_startup_closes_the_inflight_playwright_context() {
     let mut fixture = Fixture::new();
     fixture
         .config
@@ -322,10 +321,7 @@ async fn browser_exit_updates_liveness_and_override_profile_dir_is_respected() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        fixture.capture()["options"]["userDataDir"],
-        json!(override_dir)
-    );
+    assert_eq!(fixture.capture()["userDataDir"], json!(override_dir));
     tokio::time::timeout(Duration::from_secs(3), async {
         while fixture.launcher.is_running_async(&fixture.profile.id).await {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -363,4 +359,77 @@ async fn missing_runtime_and_legacy_launch_have_actionable_errors() {
         .await
         .unwrap_err();
     assert!(error.to_string().contains("launch_with_chromix"));
+}
+
+#[tokio::test]
+async fn authenticated_socks_options_use_a_lifetime_bound_loopback_bridge() {
+    let mut fixture = Fixture::new();
+    fixture.config.options.insert("contextOptions".into(), json!({
+        "proxy": {"server":"socks5://127.0.0.1:1", "username":"private-user", "password":"private-password"}
+    }));
+    fixture
+        .launcher
+        .launch_with_chromix(
+            &fixture.profile.id,
+            Path::new(""),
+            None,
+            &fixture.config,
+            fixture.runtime(),
+            true,
+        )
+        .await
+        .unwrap();
+    let captured = fixture.capture();
+    let proxy = &captured["options"]["proxy"];
+    assert!(proxy.get("username").is_none());
+    assert!(proxy.get("password").is_none());
+    let address = proxy["server"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("socks5://")
+        .unwrap();
+    assert!(address.starts_with("127.0.0.1:"));
+    let socket = tokio::net::TcpStream::connect(address).await.unwrap();
+    drop(socket);
+    fixture.launcher.close_all().await;
+    assert!(tokio::net::TcpStream::connect(address).await.is_err());
+}
+
+#[tokio::test]
+async fn random_seed_changes_between_launches_without_mutating_profile_settings() {
+    let mut fixture = Fixture::new();
+    fixture
+        .config
+        .options
+        .insert("fingerprintMode".into(), json!("random"));
+    let before = fixture.pm.get(&fixture.profile.id).unwrap().unwrap();
+    let mut seeds = Vec::new();
+    for _ in 0..2 {
+        fixture
+            .launcher
+            .launch_with_chromix(
+                &fixture.profile.id,
+                Path::new(""),
+                None,
+                &fixture.config,
+                fixture.runtime(),
+                true,
+            )
+            .await
+            .unwrap();
+        seeds.push(
+            fixture.capture()["options"]["args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|arg| arg.as_str().unwrap().starts_with("--fingerprint="))
+                .unwrap()
+                .clone(),
+        );
+        fixture.launcher.close_all().await;
+    }
+    assert_ne!(seeds[0], seeds[1]);
+    let after = fixture.pm.get(&fixture.profile.id).unwrap().unwrap();
+    assert_eq!(before.fingerprint.seed, after.fingerprint.seed);
+    assert_eq!(before.chromix_options, after.chromix_options);
 }

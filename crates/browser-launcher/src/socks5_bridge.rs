@@ -23,8 +23,8 @@ impl Socks5Bridge {
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = rx.changed() => {
-                        if *rx.borrow() { break; }
+                    changed = rx.changed() => {
+                        if changed.is_err() || *rx.borrow() { break; }
                     }
                     accept = listener.accept() => {
                         let (sock, _addr) = match accept {
@@ -41,7 +41,13 @@ impl Socks5Bridge {
             }
         });
 
-        Ok((Self { shutdown_tx, local_port }, local_port))
+        Ok((
+            Self {
+                shutdown_tx,
+                local_port,
+            },
+            local_port,
+        ))
     }
 
     pub async fn stop(self) -> Result<()> {
@@ -78,7 +84,9 @@ async fn handle_socks_client(
     }
     if req[1] != 0x01 {
         // Command not supported
-        let _ = client.write_all(&[0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await;
+        let _ = client
+            .write_all(&[0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
+            .await;
         let _ = client.flush().await;
         // Drain any leftover request bytes the client sent so Windows doesn't RST
         // the socket on drop with buffered data, which would race the client's
@@ -89,28 +97,40 @@ async fn handle_socks_client(
     let host = match req[3] {
         0x01 => {
             let mut ip = [0u8; 4];
-            if client.read_exact(&mut ip).await.is_err() { return; }
+            if client.read_exact(&mut ip).await.is_err() {
+                return;
+            }
             format!("{}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3])
         }
         0x03 => {
             let mut len = [0u8; 1];
-            if client.read_exact(&mut len).await.is_err() { return; }
+            if client.read_exact(&mut len).await.is_err() {
+                return;
+            }
             let mut name = vec![0u8; len[0] as usize];
-            if client.read_exact(&mut name).await.is_err() { return; }
+            if client.read_exact(&mut name).await.is_err() {
+                return;
+            }
             String::from_utf8_lossy(&name).to_string()
         }
         0x04 => {
             let mut ip = [0u8; 16];
-            if client.read_exact(&mut ip).await.is_err() { return; }
+            if client.read_exact(&mut ip).await.is_err() {
+                return;
+            }
             // IPv6 literal
             let mut s = String::from("[");
-            for b in ip.iter() { s.push_str(&format!("{b:02x}")); }
+            for b in ip.iter() {
+                s.push_str(&format!("{b:02x}"));
+            }
             s.push(']');
             // Simplified — real impl would format properly
             s
         }
         _ => {
-            let _ = client.write_all(&[0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await;
+            let _ = client
+                .write_all(&[0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
+                .await;
             let _ = client.flush().await;
             // No further bytes are defined for unknown ATYP; the client may still
             // have written a port. Best-effort drain to avoid Windows RST-on-drop.
@@ -119,20 +139,28 @@ async fn handle_socks_client(
         }
     };
     let mut port_bytes = [0u8; 2];
-    if client.read_exact(&mut port_bytes).await.is_err() { return; }
+    if client.read_exact(&mut port_bytes).await.is_err() {
+        return;
+    }
     let port = u16::from_be_bytes(port_bytes);
 
     // Upstream tunnel
     let upstream_sock = match connect_upstream(&upstream, &host, port).await {
         Ok(s) => s,
         Err(_) => {
-            let _ = client.write_all(&[0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await;
+            let _ = client
+                .write_all(&[0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
+                .await;
             return;
         }
     };
 
     // Success reply
-    if client.write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await.is_err() {
+    if client
+        .write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
+        .await
+        .is_err()
+    {
         return;
     }
 
@@ -148,12 +176,38 @@ async fn connect_upstream(
     if upstream.proxy_type == "socks5" {
         // Upstream SOCKS5: connect to proxy, do SOCKS5 handshake with hostname passthrough.
         let mut s = TcpStream::connect((upstream.host.as_str(), upstream.port)).await?;
-        // Greeting
-        s.write_all(&[0x05, 0x01, 0x00]).await?;
+        let username = upstream.username.as_deref().unwrap_or("");
+        let password = upstream.password.as_deref().unwrap_or("");
+        let authenticated = !username.is_empty() || !password.is_empty();
+        if username.len() > 255 || password.len() > 255 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "SOCKS5 credentials must be at most 255 bytes",
+            ));
+        }
+        let method = if authenticated { 0x02 } else { 0x00 };
+        s.write_all(&[0x05, 0x01, method]).await?;
         let mut rep = [0u8; 2];
         s.read_exact(&mut rep).await?;
-        if rep[1] != 0x00 {
-            return Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "socks5 no-auth rejected"));
+        if rep != [0x05, method] {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "upstream SOCKS5 authentication method rejected",
+            ));
+        }
+        if authenticated {
+            let mut auth = vec![0x01, username.len() as u8];
+            auth.extend_from_slice(username.as_bytes());
+            auth.push(password.len() as u8);
+            auth.extend_from_slice(password.as_bytes());
+            s.write_all(&auth).await?;
+            s.read_exact(&mut rep).await?;
+            if rep != [0x01, 0x00] {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "upstream SOCKS5 authentication failed",
+                ));
+            }
         }
         // Request: ATYP=0x03 (domain)
         let host_bytes = host.as_bytes();
@@ -161,11 +215,27 @@ async fn connect_upstream(
         req.extend_from_slice(host_bytes);
         req.extend_from_slice(&port.to_be_bytes());
         s.write_all(&req).await?;
-        let mut reply = [0u8; 10];
+        let mut reply = [0u8; 4];
         s.read_exact(&mut reply).await?;
-        if reply[1] != 0x00 {
-            return Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "upstream socks5 connect failed"));
+        if reply[0] != 0x05 || reply[1] != 0x00 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                "upstream socks5 connect failed",
+            ));
         }
+        let address_len = match reply[3] {
+            0x01 => 4,
+            0x04 => 16,
+            0x03 => s.read_u8().await? as usize,
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "invalid upstream SOCKS5 address type",
+                ))
+            }
+        };
+        let mut address_and_port = vec![0; address_len + 2];
+        s.read_exact(&mut address_and_port).await?;
         Ok(s)
     } else {
         // HTTP CONNECT
@@ -182,7 +252,10 @@ async fn connect_upstream(
         let n = s.read(&mut buf).await?;
         let status = String::from_utf8_lossy(&buf[..n]);
         if !status.starts_with("HTTP/1.0 2") && !status.starts_with("HTTP/1.1 2") {
-            return Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "http connect failed"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                "http connect failed",
+            ));
         }
         // Drain remaining headers until empty line — simplified: we assume the first read
         // may not contain all headers; a production impl would loop. For the bridge's
@@ -202,7 +275,7 @@ fn base64(user: &str, pass: &str) -> String {
     let bytes = input.as_bytes();
     let mut i = 0;
     while i + 2 < bytes.len() {
-        let n = ((bytes[i] as u32) << 16) | ((bytes[i+1] as u32) << 8) | (bytes[i+2] as u32);
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8) | (bytes[i + 2] as u32);
         out.push(TABLE[((n >> 18) & 0x3f) as usize] as char);
         out.push(TABLE[((n >> 12) & 0x3f) as usize] as char);
         out.push(TABLE[((n >> 6) & 0x3f) as usize] as char);
@@ -217,7 +290,7 @@ fn base64(user: &str, pass: &str) -> String {
         out.push('=');
         out.push('=');
     } else if rem == 2 {
-        let n = ((bytes[i] as u32) << 16) | ((bytes[i+1] as u32) << 8);
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8);
         out.push(TABLE[((n >> 18) & 0x3f) as usize] as char);
         out.push(TABLE[((n >> 12) & 0x3f) as usize] as char);
         out.push(TABLE[((n >> 6) & 0x3f) as usize] as char);
@@ -234,15 +307,17 @@ fn base64(user: &str, pass: &str) -> String {
 /// race the client's read of our error reply and surface as ConnectionReset.
 async fn drain_request_leftovers(client: &mut TcpStream, atyp: u8) {
     let to_drain: usize = match atyp {
-        0x01 => 4 + 2,              // IPv4 + port
+        0x01 => 4 + 2, // IPv4 + port
         0x03 => {
             // domain: 1 length + name + port — we don't know length without reading
             let mut len = [0u8; 1];
-            if client.read_exact(&mut len).await.is_err() { return; }
+            if client.read_exact(&mut len).await.is_err() {
+                return;
+            }
             len[0] as usize + 2
         }
-        0x04 => 16 + 2,             // IPv6 + port
-        _ => 2,                     // unknown ATYP: client may still have written a port
+        0x04 => 16 + 2, // IPv6 + port
+        _ => 2,         // unknown ATYP: client may still have written a port
     };
     let mut buf = vec![0u8; to_drain];
     let _ = client.read_exact(&mut buf).await;

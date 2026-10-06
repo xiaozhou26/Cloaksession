@@ -14,11 +14,31 @@
 !/docs/
 !/docs/ACCEPTANCE.md
 
-# Chromix SDK runtime dependencies
-/crates/tauri-app/resources/chromix/node_modules/
+# JavaScript dependencies and frontend outputs
+**/node_modules/
+/desktop/frontend/dist/
+/desktop/frontend/*.tsbuildinfo
+/desktop/frontend/playwright-report/
+/desktop/frontend/test-results/
+/desktop/frontend/wailsjs/
 
-# Tauri dev logs
-tauri-*.log
+# Wails outputs; keep platform packaging sources tracked
+/desktop/build/bin/
+/desktop/build/dist/
+/desktop/build/Resources/
+/desktop/build/appicon.png
+/desktop/build/README.md
+/desktop/build/darwin/Info.dev.plist
+/desktop/build/windows/icon.ico
+/desktop/build/windows/info.json
+/desktop/build/windows/wails.exe.manifest
+/desktop/build/windows/installer/
+/desktop/*.syso
+wails-*.log
+
+# Python build helpers
+__pycache__/
+*.pyc
 
 # OS
 Thumbs.db

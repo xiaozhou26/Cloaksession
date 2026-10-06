@@ -85,7 +85,7 @@ impl ActivityLog {
     /// broadcast buffer (256 slots) will observe `RecvError::Lagged` from
     /// `recv()` — callers should log and continue.
     ///
-    /// Used by the Tauri shell (P4.5) to bridge activity events to the
+    /// Used by the desktop core to bridge activity events to the
     /// frontend via `app.emit("activity:event", event)`.
     pub fn subscribe(&self) -> broadcast::Receiver<ActivityEvent> {
         self.tx.subscribe()

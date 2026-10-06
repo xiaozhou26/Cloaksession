@@ -159,7 +159,10 @@ impl BrowserLauncher {
 
         // 9. Spawn.
         let mut cmd = Command::new(binary_path);
-        cmd.args(&args);
+        // Browser subprocesses must not inherit the desktop host's RPC streams.
+        cmd.args(&args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null());
         let child = cmd
             .spawn()
             .map_err(|e| MultizenError::Launch(format!("spawn: {e}")))?;
@@ -188,7 +191,7 @@ impl BrowserLauncher {
         })
     }
 
-    /// Launch through the bundled official SDK; an empty binary path enables SDK resolution.
+    /// Launch through direct Playwright; an empty path uses its installed browser binary.
     pub async fn launch_with_chromix(
         &self,
         profile_id: &str,
