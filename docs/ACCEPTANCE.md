@@ -2,7 +2,7 @@
 
 1.4.0 将原 Rust 应用后端全部迁移到 Wails Go 主程序。资源已移动到 `desktop/resources/playwright` 和 `desktop/resources/companion`。当前文档区分构建契约、已执行检查和仍需验证的纯 Go 行为；**1.3.0 的 Rust/Go 集成、真实浏览器和 universal 包通过记录不是 1.4.0 的证据**。
 
-1.3.0 标签已经存在，其发布工作流因纯 Go 新要求取消。下一目标标签为 `v1.4.0`，实际远端结果以 GitHub Actions 为准。
+1.3.0 标签的发布工作流因纯 Go 新要求取消。1.4.0 的通用测试、macOS 和 Linux 构建通过，Windows 安装包已生成，但 EOF 生命周期测试失败，阻止了 Release。修复版本为 `v1.4.1`；实际远端结果以 GitHub Actions 为准。
 
 ## 架构与数据保留
 
