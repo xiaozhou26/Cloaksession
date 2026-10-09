@@ -20,7 +20,7 @@ import (
 	"github.com/xiaozhou26/Cloaksession/desktop/internal/store"
 )
 
-const appVersion = "1.5.1"
+const appVersion = "1.5.2"
 
 //go:embed resources/companion/*
 var companionAssets embed.FS

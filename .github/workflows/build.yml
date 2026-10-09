@@ -142,6 +142,17 @@ jobs:
       - name: Build release package
         if: inputs.package
         run: python scripts/build.py --package ${{ matrix.args }}
+      - name: Verify Windows installer contains reverse runtime
+        if: runner.os == 'Windows' && inputs.package
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem desktop/build/dist/*-setup.exe | Select-Object -First 1
+          $entries = & 7z l -slt $installer.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Installer listing failed' }
+          $text = $entries -join "`n"
+          foreach ($path in @('resources\reverse\bridge.mjs', 'resources\reverse\windows.mjs', 'resources\reverse\node_modules\js-reverse-mcp\package.json', 'resources\reverse\node_modules\@zhizhuodemao\patchright-core\package.json')) {
+            if (-not $text.Contains($path)) { throw "Installer missing $path" }
+          }
       - name: Test Go desktop on target platform
         working-directory: desktop
         run: go test -count=1 -mod=readonly ./...

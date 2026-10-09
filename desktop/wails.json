@@ -10,7 +10,7 @@
   "info": {
     "companyName": "Cloaksession",
     "productName": "Cloaksession",
-    "productVersion": "1.5.1",
+    "productVersion": "1.5.2",
     "copyright": "Copyright 2026 Cloaksession contributors",
     "comments": "Isolated browser session manager"
   }
