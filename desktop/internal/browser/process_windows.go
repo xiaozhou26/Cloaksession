@@ -8,8 +8,11 @@ import (
 	"syscall"
 )
 
+const createNoWindow = 0x08000000
+
 func configureProcess(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	// Suppress helper consoles without passing SW_HIDE to browser GUI windows.
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow}
 }
 func terminateProcess(cmd *exec.Cmd) { killProcess(cmd) }
 func killProcess(cmd *exec.Cmd) {

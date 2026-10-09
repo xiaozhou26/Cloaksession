@@ -36,6 +36,7 @@ class BuildTests(unittest.TestCase):
         self.put("desktop/frontend/package-lock.json", '{"version":"1.4.0","packages":{"":{"version":"1.4.0"}}}')
         self.put("desktop/wails.json", '{"info":{"productVersion":"1.4.0"}}')
         self.put("desktop/go.mod", "module github.com/xiaozhou26/Cloaksession/desktop\n\nrequire github.com/wailsapp/wails/v2 v2.11.0\n")
+        self.put("desktop/service.go", 'package main\nconst appVersion = "1.4.0"\n')
         self.put("LICENSE", "test license")
         self.put("desktop/resources/companion/manifest.json", "{}")
         self.put("desktop/resources/companion/cs.js", "// companion")
@@ -65,6 +66,16 @@ class BuildTests(unittest.TestCase):
         manifest["version"] = "1.3.0"
         path.write_text(json.dumps(manifest))
         with self.assertRaisesRegex(RuntimeError, "resources/playwright/package.json"):
+            build.verify_versions()
+
+    def test_stale_backend_version_rejected(self):
+        self.put("desktop/service.go", 'package main\nconst appVersion = "1.3.0"\n')
+        with self.assertRaisesRegex(RuntimeError, "service.go appVersion"):
+            build.verify_versions()
+
+    def test_missing_backend_version_rejected(self):
+        self.put("desktop/service.go", "package main\n")
+        with self.assertRaisesRegex(RuntimeError, "service.go appVersion"):
             build.verify_versions()
 
     def test_stale_frontend_lock_rejected(self):

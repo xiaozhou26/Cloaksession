@@ -43,8 +43,13 @@ def verify_versions(tag=None):
     version = read_json(DESKTOP / "wails.json")["info"]["productVersion"]
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise RuntimeError("Desktop version must be a numeric major.minor.patch version")
+    backend_version = re.search(r'(?m)^const appVersion = "([^"]+)"\s*$',
+                                (DESKTOP / "service.go").read_text(encoding="utf-8"))
+    if backend_version is None:
+        raise RuntimeError("service.go appVersion is missing")
     lock = read_json(FRONTEND / "package-lock.json")
     versions = {
+        "service.go appVersion": backend_version.group(1),
         "frontend/package.json": read_json(FRONTEND / "package.json")["version"],
         "frontend/package-lock.json": lock["version"],
         "frontend/package-lock.json packages root": lock["packages"][""]["version"],
