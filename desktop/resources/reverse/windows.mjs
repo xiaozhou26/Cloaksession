@@ -7,13 +7,42 @@ export async function installWindowSelection(packageURL) {
   enhanceWindowSelection(selectPage, zod, assertBrowserUrlAllowed);
 }
 
+const synchronizedSessions = new WeakSet();
+
+export function synchronizeResume(session) {
+  if (synchronizedSessions.has(session)) return session;
+  synchronizedSessions.add(session);
+  const send = session.send.bind(session);
+  session.send = async (method, params) => {
+    if (method !== 'Debugger.resume') return send(method, params);
+    let resumed;
+    let timer;
+    const event = new Promise((resolve) => { resumed = resolve; });
+    session.on('Debugger.resumed', resumed);
+    try {
+      const result = await send(method, params);
+      await Promise.race([
+        event,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Timed out waiting for Debugger.resumed; inspect pause state before continuing')), 5000);
+        }),
+      ]);
+      return result;
+    } finally {
+      clearTimeout(timer);
+      session.off('Debugger.resumed', resumed);
+    }
+  };
+  return session;
+}
+
 export function installFrameSessionFallback(Provider) {
   const original = Provider.prototype.getSession;
   Provider.prototype.getSession = async function (target) {
-    try { return await original.call(this, target); }
+    try { return synchronizeResume(await original.call(this, target)); }
     catch (error) {
       if (typeof target.page === 'function' && /does not have a separate CDP session/.test(String(error.message))) {
-        return original.call(this, target.page());
+        return synchronizeResume(await original.call(this, target.page()));
       }
       throw error;
     }

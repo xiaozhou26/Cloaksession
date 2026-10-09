@@ -6,8 +6,8 @@ test('same-process iframe reuses page CDP session while OOPIF keeps its own', as
   const page = { mainFrame() {} };
   const child = { page: () => page };
   const oopif = { page: () => page };
-  const pageSession = {};
-  const frameSession = {};
+  const pageSession = { send: async () => ({}) };
+  const frameSession = { send: async () => ({}) };
   class Provider {
     async getSession(target) {
       if (target === child) throw new Error("This frame does not have a separate CDP session, it is a part of the parent frame's session");
