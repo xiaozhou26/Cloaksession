@@ -1,0 +1,16 @@
+{
+  "name": "cloaksession-reverse-bridge",
+  "version": "1.5.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=23"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:smoke": "node --test test/smoke.test.mjs"
+  },
+  "dependencies": {
+    "js-reverse-mcp": "4.0.5"
+  }
+}

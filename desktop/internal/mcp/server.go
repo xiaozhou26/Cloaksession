@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/xiaozhou26/Cloaksession/desktop/internal/debugger"
 )
 
 const maxBodyBytes = 1024 * 1024
@@ -26,12 +28,13 @@ type Server struct {
 	cancel     context.CancelFunc
 	port       int
 	closed     bool
+	sessions   map[string]*httpSession
 	activityMu sync.Mutex
 	events     []map[string]any
 }
 
 func New(backend Backend, token string, emit func(string, any)) *Server {
-	return &Server{backend: backend, token: token, emit: emit, events: make([]map[string]any, 0, activityCapacity)}
+	return &Server{backend: backend, token: token, emit: emit, sessions: make(map[string]*httpSession), events: make([]map[string]any, 0, activityCapacity)}
 }
 
 // Start binds before returning, so bind failures are reported to the caller.
@@ -70,6 +73,7 @@ func (s *Server) Close(ctx context.Context) error {
 	s.closed = true
 	server, cancel := s.httpServer, s.cancel
 	s.mu.Unlock()
+	defer s.closeSessions()
 	if server == nil {
 		return nil
 	}
@@ -94,9 +98,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if (r.URL.Path == "/mcp" && r.Method != http.MethodPost) || (r.URL.Path == "/sse" && r.Method != http.MethodGet) {
+	if (r.URL.Path == "/mcp" && r.Method != http.MethodPost && r.Method != http.MethodDelete) || (r.URL.Path == "/sse" && r.Method != http.MethodGet) {
 		if r.URL.Path == "/mcp" {
-			methodNotAllowed(w, "POST")
+			methodNotAllowed(w, "POST, DELETE")
 		} else {
 			methodNotAllowed(w, "GET")
 		}
@@ -128,6 +132,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sse not wired", http.StatusNotImplemented)
 		return
 	}
+	if r.Method == http.MethodDelete {
+		s.deleteHTTPSession(w, r)
+		return
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -144,7 +152,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, rpcError(nil, -32700, "parse error: trailing data"))
 		return
 	}
-	writeJSON(w, s.handleRPC(r.Context(), request))
+	s.handleHTTPRPC(w, r, request)
 }
 
 func methodNotAllowed(w http.ResponseWriter, allow string) {
@@ -182,7 +190,7 @@ func (s *Server) handleRPC(ctx context.Context, value any) map[string]any {
 	}
 	switch method {
 	case "initialize":
-		return rpcResult(id, map[string]any{"protocolVersion": "2024-11-05", "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}},
+		return rpcResult(id, map[string]any{"protocolVersion": negotiatedProtocol(r), "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo": map[string]any{"name": "cloaksession", "version": "0.1.0"}})
 	case "notifications/initialized", "ping":
 		return rpcResult(id, map[string]any{})
@@ -206,6 +214,9 @@ func (s *Server) handleRPC(ctx context.Context, value any) map[string]any {
 			args = map[string]any{}
 		}
 		result, err := s.callTool(ctx, t, args)
+		if err == nil && (debugger.IsTool(name) || name == "list_windows") {
+			return rpcResult(id, result)
+		}
 		var text string
 		if err == nil {
 			var data []byte

@@ -67,6 +67,16 @@ func (m *Manager) IsRunning(id string) bool {
 	h := m.profiles[id]
 	return h != nil && h.alive() && !h.stopping.Load() && h.reason == ""
 }
+
+// Endpoint returns only the CDP endpoint of a live browser owned by this manager.
+func (m *Manager) Endpoint(id string) (string, error) {
+	h, err := m.get(id)
+	if err != nil {
+		return "", err
+	}
+	return h.endpoint, nil
+}
+
 func (m *Manager) get(id string) (*instance, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

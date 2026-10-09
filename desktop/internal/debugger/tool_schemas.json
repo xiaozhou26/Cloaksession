@@ -1,0 +1,860 @@
+[
+  {
+    "name": "break_on_xhr",
+    "description": "Sets a URL-substring breakpoint for a future XHR/Fetch when runtime request arguments, local variables, or payload construction must be inspected. For an already captured request, call get_request_initiator first because it is non-pausing; use this only when that evidence is insufficient. Set it before reproducing the user action—it does not inspect past traffic—then call get_paused_info/evaluate_script and finally step or resume. The URL pattern identifies this breakpoint for list_breakpoints and remove_breakpoint(action=\"remove_xhr\").",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Case-sensitive URL substring matched against future XHR/Fetch requests. Prefer a narrow endpoint path from list_network_requests; retain the exact string to remove the breakpoint later."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "clear_network_requests",
+    "description": "Discard captured HTTP(S) evidence for the currently selected page after confirm=true. Use this immediately before reproducing an action when a clean network capture window is needed; do not use it to reset login, cookies, cache, or other browser state. It irreversibly clears the in-memory request queue, cached response bodies, and initiator maps only. Browser cookies, HTTP cache, origin storage, console messages, and WebSocket connections/messages are unchanged; use clear_site_data for cookie and storage reset. New captures continue above the previous reqid high-water mark because reqids are never reused.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "default": false,
+          "description": "Must be true to irreversibly delete the selected page's captured request history, response-body cache, and initiator evidence. This confirms capture cleanup, not browser-state cleanup.",
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "clear_site_data",
+    "description": "Irreversibly clear browser state after confirm=true to create a clean replay environment for the selected page. Use this before replaying login, session creation, storage initialization, or other state-dependent flows; do not use it to inspect cookies or determine which response set one. For cookie provenance, including HttpOnly, Secure, and SameSite attributes, use list_network_requests with cookieName first. Cleanup covers cookies affecting the selected page's HTTP(S) frames—including HttpOnly and Secure cookies through the browser context—persistent storage for those frame origins, and each HTTP(S) frame's sessionStorage. It does not reload the page. The browser HTTP cache is global and is preserved by default; set clearBrowserCache=true only when that wider cross-page effect is explicitly intended.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "default": false,
+          "description": "Must be true to irreversibly delete cookies affecting the selected page's HTTP(S) frames, persistent storage for those frame origins, and HTTP(S) frame sessionStorage. This confirms state reset for replay, not inspection.",
+          "type": "boolean"
+        },
+        "clearBrowserCache": {
+          "default": false,
+          "description": "Also clear the browser-wide HTTP cache. Leave false for site-scoped replay cleanup. Setting true has a wider global effect on every page and origin in this browser, not only the selected page or its frame origins.",
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "click_element",
+    "description": "Performs one verified, auditable click in the currently selected frame. Use it when the task requires activating a known button, link, or control after selecting the correct page/frame and identifying a CSS selector; it is the preferred minimal interaction primitive over arbitrary evaluate_script code. It does not discover elements, type text, or silently guess among matches: the selector must resolve to exactly one element unless index is explicit, and the chosen element must be visible. A click can submit data, navigate, or trigger external effects, so confirm=true is required and the result reports the exact resolved element.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "default": false,
+          "description": "Must be true to authorize this specific click because it can submit data, navigate, or trigger external side effects.",
+          "type": "boolean"
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CSS selector evaluated only in the currently selected frame. Use select_frame first when the target is inside an iframe."
+        },
+        "index": {
+          "description": "Explicit zero-based match index. Required when the selector matches more than one element.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "button": {
+          "default": "left",
+          "description": "Mouse button. Defaults to left.",
+          "type": "string",
+          "enum": [
+            "left",
+            "middle",
+            "right"
+          ]
+        },
+        "modifiers": {
+          "description": "Optional keyboard modifiers held during the click.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "Alt",
+              "Control",
+              "ControlOrMeta",
+              "Meta",
+              "Shift"
+            ]
+          }
+        },
+        "timeout": {
+          "description": "Maximum wait time in milliseconds. If set to 0, the default timeout will be used.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "selector"
+      ]
+    }
+  },
+  {
+    "name": "evaluate_script",
+    "description": "Evaluates one focused JavaScript function for DOM/page state, web storage, page-defined globals, a paused-frame expression, or browser-side processing of one local file. Use it when those runtime values are the goal and no narrower evidence tool applies. Do not use document.cookie or page evaluation to investigate HttpOnly/Secure cookies, Set-Cookie provenance, or captured HTTP evidence; use list_network_requests with cookieName/reqid, and use search_in_sources/get_script_source for source discovery. While running, evaluation uses the selected frame's isolated world by default or its page main world with mainWorld=true; while paused, it always uses the chosen call frame and ignores mainWorld. Call get_paused_info before paused evaluation, then step or resume when finished. Arbitrary code can change page/external state and requires confirm=true; inline results are bounded, so use outputFile for exact large or binary results.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "default": false,
+          "description": "Must be true to authorize this exact arbitrary-code evaluation, which may mutate page state, send requests, or cause external side effects. Prefer a read-only expression when inspection is sufficient.",
+          "type": "boolean"
+        },
+        "function": {
+          "type": "string",
+          "description": "JavaScript function declaration invoked by the tool, for example `() => document.title` or `async () => await Promise.resolve(location.href)`. Return JSON-serializable data; ArrayBuffer/typed arrays require outputFile for exact bytes. With localFilePath, accept `async ({localFile}) => ...` and read localFile.text for UTF-8 or localFile.base64 for exact bytes. Keep the function focused; use mainWorld=true only when page-defined globals are required."
+        },
+        "mainWorld": {
+          "default": false,
+          "description": "Running-page mode only: false uses the selected frame's isolated context; true uses that frame's page main world to access application-defined globals. When execution is paused, evaluation always targets frameIndex and this option is ignored.",
+          "type": "boolean"
+        },
+        "frameIndex": {
+          "description": "Paused mode only: zero-based call frame from get_paused_info (default: top frame). The index and its callFrameId expire after any step or resume.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "outputFile": {
+          "description": "Save the exact result locally instead of returning bounded inline content. JSON-serializable values are written as JSON text and ArrayBuffer/typed arrays as raw bytes; the returned filename is resolved and subject to --allowedRoots.",
+          "type": "string"
+        },
+        "confirmOverwrite": {
+          "default": false,
+          "description": "Set true only to authorize replacing an existing outputFile. A new file does not require overwrite confirmation.",
+          "type": "boolean"
+        },
+        "localFilePath": {
+          "description": "Absolute path to one host file passed as localFile; the browser never reads the path directly. Running-page input is limited to 10 MiB, while paused call-frame input remains limited to 512 KiB. Relative paths, file:// URLs, globs, ~, and directories are rejected, access is subject to --allowedRoots, and file contents may expose sensitive host data.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "function"
+      ]
+    }
+  },
+  {
+    "name": "get_paused_info",
+    "description": "Inspects the current call stack, source locations, and selected call-frame scopes after a code/XHR breakpoint or explicit pause has stopped execution. It neither creates a pause nor resumes one. Returned frameIndex values and callFrameIds belong only to the current pause and expire after any step or resume; use evaluate_script with frameIndex for a focused expression, then step or pause_or_resume(action=\"resume\").",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "includeScopes": {
+          "default": true,
+          "description": "Include bounded variables from the selected call frame (default: true). Set false when only the stack and source locations are needed.",
+          "type": "boolean"
+        },
+        "maxScopeDepth": {
+          "default": 2,
+          "description": "Scope categories to include for frameIndex (default: 2): 1 reads arguments/locals, 2 also reads closures, and 3+ includes other non-global scopes. Increase only when the needed value is absent.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "frameIndex": {
+          "default": 0,
+          "description": "Zero-based frame from this pause whose scopes should be read (default: top frame). Frame indices change after a step and expire on resume.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  },
+  {
+    "name": "get_request_initiator",
+    "description": "Non-pausing first action for tracing which JavaScript initiated a retained HTTP request when CDP initiator evidence was active. Pass the reqid from list_network_requests; because initiator capture starts lazily and is not retroactive, an older request may have no stack—in that case reproduce the action and inspect the new reqid, or set break_on_xhr before reproduction when runtime values are required. If the captured stack identifies the code, inspect its URL/location with get_script_source. If arguments, locals, or a dynamically built payload are still needed, use break_on_xhr, reproduce, then call get_paused_info or evaluate_script before stepping or resuming. This tool only reads retained evidence and does not pause or reproduce the request.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Numeric reqid returned by list_network_requests, not a raw CDP request ID. It survives navigation while retained, but becomes stale after FIFO eviction or clear_network_requests; list requests again if needed."
+        }
+      },
+      "required": [
+        "requestId"
+      ]
+    }
+  },
+  {
+    "name": "get_script_source",
+    "description": "Reads a small source region around a search match, paused location, or known statement without executing or pausing the page. Select by URL when available because URL-backed scripts can be resolved again after navigation; use the debugger-context-scoped scriptId only for current inline/eval scripts. Use line ranges for normal source and offset/length for minified single-line bundles. For a whole, minified, or WASM source, use save_script_source; to observe runtime values next, call set_breakpoint_on_text against the original loaded source.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "url": {
+          "description": "URL from list_scripts, search_in_sources, or a call stack. Preferred stable selector for URL-backed scripts; resolution tries an exact match before a substring match, so provide enough of the URL to avoid ambiguity.",
+          "type": "string"
+        },
+        "scriptId": {
+          "description": "Debugger-context-scoped script ID from list_scripts, search_in_sources, or paused information. Required for unnamed inline/eval scripts, but invalid after reload, navigation, or debugger target/frame change; prefer url for external scripts.",
+          "type": "string"
+        },
+        "startLine": {
+          "description": "Inclusive 1-based start line, typically copied from search_in_sources or paused information. Use with endLine for normal multi-line source.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "endLine": {
+          "description": "Inclusive 1-based end line for a bounded multi-line snippet. Omit both line bounds and use offset/length for a minified single-line bundle.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "offset": {
+          "description": "Zero-based character offset into the original source. Use for a bounded read of minified single-line code when line ranges would be too large.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "length": {
+          "default": 1000,
+          "description": "Maximum characters to return from offset (default: 1000). This is ignored unless offset is provided.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  },
+  {
+    "name": "get_websocket_messages",
+    "description": "Inspect captured bidirectional WebSocket connections and frame payloads for the selected page. Use this for WebSocket, socket, live-update, push, streaming, or realtime message flows; use list_network_requests for ordinary HTTP/XHR/fetch traffic and WebSocket upgrade request headers. WebSocket capture starts lazily on this tool's first use and is not retroactive: if the relevant socket already connected or exchanged frames, call this tool once to initialize capture, then reload or reproduce the flow. Without wsid it lists connections so you can choose one. With wsid it lists paginated sent/received frames; add show_content=true for payload previews. With wsid and analyze=true it groups frames by payload pattern and returns group IDs and sample frame indices; then use groupId to inspect one pattern. With wsid and frameIndex it returns one retained frame's detailed payload using the stable index shown in frame tables or analysis samples.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "wsid": {
+          "description": "Select a WebSocket connection by the wsid returned from connection-list mode. Omit it to list captured connections before inspecting their frames.",
+          "type": "number"
+        },
+        "analyze": {
+          "default": false,
+          "description": "With wsid, group retained frames by payload pattern/fingerprint. Use this to discover message types in noisy realtime traffic; it returns traffic statistics, group IDs, and sample stable frame indices. Follow with groupId or frameIndex for focused inspection.",
+          "type": "boolean"
+        },
+        "frameIndex": {
+          "description": "With wsid, return one retained frame and its payload by stable frame index. This is the Idx shown in frame tables or analyze=true samples, not a page-relative array offset. Indices are monotonic and may begin above 0 after older frames are evicted.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "direction": {
+          "description": "With wsid, restrict frame-list, analysis, or group results to frames \"sent\" by the page or \"received\" from the server. It does not filter connection-list mode.",
+          "type": "string",
+          "enum": [
+            "sent",
+            "received"
+          ]
+        },
+        "groupId": {
+          "description": "With wsid, list only frames from a pattern group such as A, B, or C. Run analyze=true first to discover group IDs. If analysis used direction, repeat the same direction because grouping is computed over that filtered frame set.",
+          "type": "string"
+        },
+        "pageSize": {
+          "description": "Items per page: connections when wsid is omitted, frames in normal/group mode, or pattern groups when analyze=true. Defaults to 10.",
+          "default": 10,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pageIdx": {
+          "description": "Zero-based page for the active connection-list, frame-list, group-list, or analysis-group mode. Omit it for the first page.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "show_content": {
+          "description": "With wsid in normal or group frame-list mode, include payload previews up to 10,000 characters for frames on the current page. Leave false for compact metadata, or use frameIndex when one exact frame needs detailed inspection.",
+          "default": false,
+          "type": "boolean"
+        },
+        "urlFilter": {
+          "description": "In connection-list mode only (without wsid), return WebSocket URLs containing this substring. Use it to narrow by host, path, or query text.",
+          "type": "string"
+        },
+        "includePreservedConnections": {
+          "description": "In connection-list mode only (without wsid), include connections preserved from the last three navigations. Use this when the relevant socket belonged to a previous page state.",
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "list_breakpoints",
+    "description": "Inspects code and XHR/Fetch breakpoints managed by this MCP session before reproducing an action or cleaning up debugger state. Returns current code breakpointIds and the exact XHR URL patterns needed by remove_breakpoint; URL-backed definitions are restored after navigation when possible, but a rebuilt debugger session may assign new IDs. This does not show why or where execution is currently paused—use get_paused_info for the active call stack.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "pageSize": {
+          "description": "Maximum items per page. Defaults to 20.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pageIdx": {
+          "description": "Page number (0-based). Defaults to 0.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  },
+  {
+    "name": "list_console_messages",
+    "description": "Inspects console messages and uncaught page errors captured for the selected page. Use it to diagnose runtime failures, warnings, application logs, or values already emitted by page code; use search_in_sources for source text and list_network_requests for HTTP evidence instead. Without msgid it lists messages 20 per page by default, optionally filtered by type or retained navigation history. With msgid it returns one message by its stable ID for focused inspection. Capture begins when this MCP attaches and is not retroactive, so reload or reproduce code that logged before attachment.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "msgid": {
+          "description": "Stable message ID returned by list mode. Pass it to inspect one captured console message; omit it to list messages.",
+          "type": "number"
+        },
+        "pageSize": {
+          "description": "Maximum number of messages to return. Defaults to 20.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pageIdx": {
+          "description": "Page number to return (0-based). When omitted, returns the first page.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "types": {
+          "description": "Console levels/types to include in list mode, such as error, warn, log, or trace. Values are OR-ed; omit or pass an empty array for all types.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "log",
+              "debug",
+              "info",
+              "error",
+              "warn",
+              "dir",
+              "dirxml",
+              "table",
+              "trace",
+              "clear",
+              "startGroup",
+              "startGroupCollapsed",
+              "endGroup",
+              "assert",
+              "profile",
+              "profileEnd",
+              "count",
+              "timeEnd",
+              "verbose"
+            ]
+          }
+        },
+        "includePreservedMessages": {
+          "description": "Include retained console messages from the last 3 navigations. Leave false when only the current page load is relevant.",
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "list_network_requests",
+    "description": "Inspect captured HTTP(S) traffic for the currently selected page. Use this for API calls, request or response headers and bodies, redirects, authentication/session flows, replay or signing inputs, and determining which response created, refreshed, rotated, overwritten, or deleted a cookie. Without reqid it lists and filters requests; with cookieName it traces exact response Set-Cookie updates oldest-first, including cookies with HttpOnly, Secure, or SameSite attributes that page JavaScript cannot fully inspect; with reqid it returns bounded request details; with reqid plus outputFile it exports exact data. To inspect complete Set-Cookie values and attributes, export outputPart=\"responseHeaders\" for a reqid returned by cookieName mode. cookieName never searches outbound Cookie request headers. Use get_websocket_messages for WebSocket frame payloads; this tool only represents the HTTP upgrade request. Capture begins when this MCP attaches and is not retroactive, so reload or reproduce traffic that occurred earlier. Captures then survive navigation in a 5000-request FIFO queue. List and cookie-flow modes default to 20 items per page; filters combine with AND and multiple values inside one filter combine with OR.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "reqid": {
+          "description": "Inspect one captured request by the reqid returned by request-list or cookie-flow mode. Omit it to list/filter requests or trace cookie setters. Add outputFile when exact, complete, or large data is needed.",
+          "type": "number"
+        },
+        "pageSize": {
+          "description": "Maximum requests or Set-Cookie updates per page in list or cookie-flow mode. Defaults to 20.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pageIdx": {
+          "description": "Zero-based page to return in request-list or cookie-flow mode. Omit it for the first page.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "methods": {
+          "description": "Filter requests by HTTP method (the request verb). Matched case-insensitively. Pass one or more of GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS; multiple values are OR-ed (e.g. [\"POST\"] shows only POSTs, [\"GET\",\"POST\"] shows both). Use this to hunt for submissions (POST/PUT/PATCH) versus reads (GET). This is the HTTP verb, distinct from resourceTypes which filters by resource category (xhr, document, ...). When omitted or empty, methods are not filtered.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "DELETE",
+              "PATCH",
+              "HEAD",
+              "OPTIONS"
+            ]
+          }
+        },
+        "resourceTypes": {
+          "description": "Filter requests to only return requests of the specified resource types (xhr, fetch, document, script, ...). This is the resource category, NOT the HTTP verb — use methods for GET/POST filtering. When omitted or empty, returns all requests.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "document",
+              "stylesheet",
+              "image",
+              "media",
+              "font",
+              "script",
+              "texttrack",
+              "xhr",
+              "fetch",
+              "prefetch",
+              "eventsource",
+              "websocket",
+              "manifest",
+              "signedexchange",
+              "ping",
+              "cspviolationreport",
+              "preflight",
+              "other"
+            ]
+          }
+        },
+        "urlFilter": {
+          "description": "Filter request-list results to URLs containing this substring. Use an endpoint path, host, query fragment, or other known URL text; combine with methods/resourceTypes to narrow an API flow.",
+          "type": "string"
+        },
+        "cookieName": {
+          "description": "Trace an exact cookie name in response Set-Cookie headers. Use this when asked where, when, or by which response a cookie was created, refreshed, rotated, overwritten, or deleted, including HttpOnly cookies and cookies carrying Secure or SameSite attributes. Matching setter responses are returned oldest-first with reqids and use pageSize/pageIdx. Export outputPart=\"responseHeaders\" for a returned reqid to inspect the complete value and Path, Domain, HttpOnly, Secure, SameSite, Expires, or Max-Age attributes. This mode does not search outbound Cookie request headers.",
+          "type": "string",
+          "minLength": 1
+        },
+        "outputFile": {
+          "description": "With reqid, save selected network data to a local file. Use export instead of bounded inline details for complete Set-Cookie headers, exact bytes, large or binary bodies, long query payloads, replay/signature inputs, or external decoding. Absolute paths and paths relative to the current working directory are supported. The response reports the resolved absolute path; use it with evaluate_script localFilePath for browser-side processing. Subject to --allowedRoots when configured.",
+          "type": "string"
+        },
+        "confirmOverwrite": {
+          "default": false,
+          "description": "Must be true when outputFile already exists. New files do not require confirmation.",
+          "type": "boolean"
+        },
+        "outputPart": {
+          "default": "all",
+          "description": "Select what outputFile receives for the chosen reqid. Use \"responseHeaders\" for complete cookie attributes and repeated Set-Cookie headers, \"responseBody\" for raw response bytes, \"requestBody\" for captured request bytes, \"queryParams\" for parsed URL parameters, or \"all\" for a JSON bundle of metadata, headers, query parameters, and body content/metadata. Defaults to \"all\".",
+          "type": "string",
+          "enum": [
+            "all",
+            "responseHeaders",
+            "responseBody",
+            "requestBody",
+            "queryParams"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "list_scripts",
+    "description": "Discovers JavaScript currently loaded in the selected debugger context—the main frame by default, or the frame chosen with select_frame. Use select_frame first for iframe-specific source/debugger work. Includes external, inline, and eval scripts in that context; if you already know a function name, endpoint, or code literal, use search_in_sources instead. Each result includes a context-scoped scriptId that expires on reload, navigation, or debugger target change and, for external scripts, a URL that is the preferred selector for get_script_source or save_script_source.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "description": "Case-insensitive URL substring used to narrow external scripts. It does not search source text or match unnamed inline/eval scripts; use search_in_sources for code-content queries.",
+          "type": "string"
+        },
+        "pageSize": {
+          "description": "Maximum items per page. Defaults to 20.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pageIdx": {
+          "description": "Page number (0-based). Defaults to 0.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  },
+  {
+    "name": "navigate_page",
+    "description": "Navigates, reloads, or moves through history in the currently selected page. Use it to reproduce requests, trigger configured breakpoints, refresh scripts, or continue a workflow in the same tab; use new_page when a separate tab is required. It does not clear cookies, storage, cache, or site data, so call clear_site_data first only when a clean replay is intended. It waits for DOMContentLoaded rather than every background resource; if a breakpoint pauses loading, use get_paused_info and then pause_or_resume(action=\"resume\"). Navigation invalidates old script IDs, while tracked URL and XHR/Fetch breakpoints are restored when possible.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Navigation action for the selected page: url, back, forward, or reload. Use type=url together with url; omit type only when url is provided.",
+          "type": "string",
+          "enum": [
+            "url",
+            "back",
+            "forward",
+            "reload"
+          ]
+        },
+        "url": {
+          "description": "Target URL for type=url. Do not pass it for back, forward, or reload.",
+          "type": "string"
+        },
+        "timeout": {
+          "description": "Maximum wait time in milliseconds. If set to 0, the default timeout will be used.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  },
+  {
+    "name": "new_page",
+    "description": "Opens a separate browser page for a URL, reusing an existing about:blank startup tab when available. Use this when the task needs another tab or should preserve the currently selected page; use navigate_page to change the URL in the existing selected page instead. It waits for DOMContentLoaded, not every background resource, and then makes the opened page the target for later tools. It preserves cookies, storage, cache, and other browser state; use clear_site_data separately when a clean replay is required.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Absolute URL to load in a separate or reusable blank page. Use navigate_page instead when the current selected page should be reused."
+        },
+        "timeout": {
+          "description": "Maximum wait time in milliseconds. If set to 0, the default timeout will be used.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "pause_or_resume",
+    "description": "Explicitly requests an immediate pause or resumes an existing paused execution; it never toggles implicitly. Use a code breakpoint or break_on_xhr instead when a specific statement/request should stop, and use get_paused_info before resuming if evidence must be collected. Resuming invalidates current callFrameIds and frame indices.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "pause",
+            "resume"
+          ],
+          "description": "Use \"pause\" only while running, or \"resume\" only after a breakpoint/manual pause. Resume after get_paused_info/evaluate_script/step inspection is complete."
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "remove_breakpoint",
+    "description": "Removes a known code breakpoint, XHR/Fetch breakpoint, or every MCP-managed breakpoint after explicit confirmation. Use breakpointId from set_breakpoint_on_text/list_breakpoints for remove_code, or reuse the exact URL pattern from break_on_xhr/list_breakpoints for remove_xhr. Removal does not resume an already paused page; call pause_or_resume(action=\"resume\") separately after inspection.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "remove_code",
+            "remove_xhr",
+            "remove_all"
+          ],
+          "description": "Required removal mode: remove_code needs breakpointId, remove_xhr needs url, and remove_all removes both kinds."
+        },
+        "breakpointId": {
+          "description": "Current breakpoint ID returned by set_breakpoint_on_text or list_breakpoints. Used only with action=\"remove_code\"; list again after a debugger/page-session rebuild because restoration may assign a new ID.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Exact URL substring pattern previously passed to break_on_xhr or returned by list_breakpoints. Used only with action=\"remove_xhr\".",
+          "type": "string"
+        },
+        "confirm": {
+          "default": false,
+          "description": "Must be true to authorize the selected removal action. This does not authorize or trigger resuming execution.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "save_script_source",
+    "description": "Saves one complete JavaScript or WASM source for local inspection when an inline snippet is insufficient, especially for large or minified bundles. Prefer get_script_source for a small known region and search_in_sources to locate text across loaded scripts first. With format=true, destinations using a supported JavaScript/TypeScript extension are formatted by default; other extensions preserve raw source, and formatted line numbers may differ from the live page. Use distinctive text plus the original URL with set_breakpoint_on_text for runtime debugging. The returned filename is the resolved local path, while scriptId remains scoped to the current debugger context.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "url": {
+          "description": "URL from list_scripts, search_in_sources, or a call stack. Preferred over scriptId because it can be resolved again after navigation; exact match is tried before substring match.",
+          "type": "string"
+        },
+        "scriptId": {
+          "description": "Debugger-context-scoped script ID from list_scripts or search_in_sources. Use for unnamed inline/eval scripts; it becomes invalid after reload, navigation, or debugger target/frame change.",
+          "type": "string"
+        },
+        "filePath": {
+          "type": "string",
+          "description": "Destination path for the complete source, absolute or relative to the server working directory and subject to --allowedRoots. A JavaScript/TypeScript extension enables formatting; use .wasm for bytecode or another extension to preserve raw text."
+        },
+        "confirmOverwrite": {
+          "default": false,
+          "description": "Set true only to authorize replacing an existing filePath. A new file does not require overwrite confirmation.",
+          "type": "boolean"
+        },
+        "format": {
+          "default": true,
+          "description": "Format supported JavaScript/TypeScript extensions for readability (default: true). Set false when exact source bytes or original line layout matter; formatted line numbers cannot be used as live breakpoint locations.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "filePath"
+      ]
+    }
+  },
+  {
+    "name": "search_in_sources",
+    "description": "Finds a known function name, endpoint, string literal, token, or code pattern in JavaScript loaded by the selected debugger context—the main frame by default, or the frame chosen with select_frame. It searches external, inline/eval, and minified sources in that context without executing or pausing the page, returning 1-based lines plus context-scoped scriptIds; URLs are the preferred selectors for URL-backed matches. Use select_frame first for iframe-specific source work, get_script_source for nearby context, save_script_source for a whole bundle, or set_breakpoint_on_text when runtime values are needed. For a known captured request, prefer get_request_initiator before a broad source search.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Source text to locate, or a regular-expression pattern when isRegex=true. Prefer a distinctive function name, endpoint, property, or literal that can also anchor set_breakpoint_on_text."
+        },
+        "caseSensitive": {
+          "default": false,
+          "description": "Match case exactly when true. Leave false for discovery; set true when choosing exact code text for a breakpoint.",
+          "type": "boolean"
+        },
+        "isRegex": {
+          "default": false,
+          "description": "Interpret query as a regular expression when true. Leave false for literal endpoint, token, and code-text searches.",
+          "type": "boolean"
+        },
+        "maxResults": {
+          "default": 30,
+          "description": "Maximum matches to return (default: 30). Narrow with urlFilter before increasing this for common text.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxLineLength": {
+          "default": 150,
+          "description": "Maximum characters in each matched-line preview (default: 150). Use get_script_source rather than a very large preview when surrounding context is needed.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "excludeMinified": {
+          "default": false,
+          "description": "Skip sources with very long lines when true. Keep the default false for reverse engineering because relevant code often exists only in compressed bundles.",
+          "type": "boolean"
+        },
+        "urlFilter": {
+          "description": "Case-insensitive script-URL substring used to narrow matches to a known bundle or domain. It excludes unnamed inline/eval scripts.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "select_frame",
+    "description": "Lists or selects frames, including iframes, within the current page. Use it when the target element, page-defined global, script, or execution context may live in an iframe: first list frames, then pass frameIdx before click_element or evaluate_script. Omitting frameIdx lists 20 frames per page without changing context; passing frameIdx changes the shared frame target, with 0 restoring the main frame. It does not switch browser tabs or navigate—use select_page or navigate_page for those actions—and listPageIdx only paginates this listing.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "frameIdx": {
+          "description": "Frame index from the latest frame listing. Pass it to target later frame-aware tools; 0 restores the main frame. Omit it to list frames without changing context, and re-list after navigation or frame attachment/detachment because indices can shift.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pageSize": {
+          "description": "Maximum frames to list per response. Defaults to 20.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "listPageIdx": {
+          "description": "Zero-based pagination index for the frame listing only. This is not the frameIdx used to select a frame. Defaults to 0.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  },
+  {
+    "name": "select_page",
+    "description": "Lists or selects open browser pages. Use it without pageIdx to identify the active page or choose the correct tab before inspecting network traffic, scripts, frames, or console output; pass pageIdx to make one listed page the shared target for later tools. It does not navigate or create pages: use navigate_page to change the selected page's URL and new_page when a separate tab is required. listPageIdx only paginates the page listing and never changes selection.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "pageIdx": {
+          "description": "Snapshot index from the latest page listing. Pass it to make that page the target for later tools; omit it to list pages without changing selection. Re-list after pages open or close because indices can shift.",
+          "type": "number"
+        },
+        "pageSize": {
+          "description": "Maximum pages to list per response. Defaults to 20.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "listPageIdx": {
+          "description": "Zero-based pagination index for the page listing only. This is not the pageIdx used to select a browser page. Defaults to 0.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  },
+  {
+    "name": "set_breakpoint_on_text",
+    "description": "Sets a restorable URL-backed breakpoint when distinctive code text is known and its runtime values must be observed. Call it directly when the user already supplies precise text plus any URL/occurrence disambiguation; use search_in_sources/get_script_source first only when the location is unknown or ambiguous. For an API with no known code location, start with list_network_requests and get_request_initiator or use break_on_xhr. On a hit, call get_paused_info, optionally evaluate_script, then step or resume. Returns the current breakpointId for remove_breakpoint; list breakpoints again after a rebuilt debugger session, and note that unnamed inline/eval scripts cannot use this URL breakpoint.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Exact case-sensitive source text used to locate the breakpoint, such as a distinctive function declaration, call, or statement. Prefer a snippet confirmed by search_in_sources and avoid common tokens."
+        },
+        "urlFilter": {
+          "description": "Case-insensitive URL substring that limits candidate scripts. Use the URL from search_in_sources/get_script_source to avoid the same text in unrelated bundles.",
+          "type": "string"
+        },
+        "occurrence": {
+          "default": 1,
+          "description": "One-based occurrence among matching loaded-source results (default: 1). Use only after reviewing multiple search matches; urlFilter is usually the more stable disambiguator.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "condition": {
+          "description": "Optional simple synchronous expression evaluated in the future call frame; the breakpoint pauses only when it is true. Use it to reduce repeated hits after the location is precise, never for async work, complex discovery, or side effects.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "step",
+    "description": "Advances JavaScript execution by one debugger operation from an existing pause and returns the next stopped call frame with concise source context. Use after get_paused_info or evaluate_script when control flow still needs tracing; it cannot start from running execution. Each advance invalidates prior callFrameIds, so inspect the new pause again as needed, then use pause_or_resume(action=\"resume\") to finish.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": [
+            "over",
+            "into",
+            "out"
+          ],
+          "description": "Choose \"over\" for the next statement without entering calls, \"into\" to follow a call, or \"out\" to continue until the current function returns."
+        }
+      },
+      "required": [
+        "direction"
+      ]
+    }
+  },
+  {
+    "name": "take_screenshot",
+    "description": "Captures the visual state of the currently selected page. Use it to verify page layout, visible UI state, selector targets, in-page dialogs/modals, or the effect of a navigation/click; it is not a substitute for DOM values, network evidence, or script inspection. By default it returns the visible viewport, while fullPage=true captures the whole document; oversized captures may be saved as a temporary artifact instead of attached. Pass filePath for a reusable local artifact; existing files require confirmOverwrite=true and remain subject to --allowedRoots.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "format": {
+          "default": "png",
+          "description": "Image format for the attachment or saved file. Defaults to png; use jpeg when smaller lossy output is preferred.",
+          "type": "string",
+          "enum": [
+            "png",
+            "jpeg"
+          ]
+        },
+        "quality": {
+          "description": "Compression quality for JPEG format (0-100). Higher values mean better quality but larger file sizes. Ignored for PNG format.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "fullPage": {
+          "description": "Capture the entire scrollable document when true; leave false or omit it for the currently visible viewport.",
+          "type": "boolean"
+        },
+        "filePath": {
+          "description": "Optional absolute or working-directory-relative path for a reusable screenshot artifact. Omit it to attach the image directly. Subject to --allowedRoots when configured.",
+          "type": "string"
+        },
+        "confirmOverwrite": {
+          "default": false,
+          "description": "Must be true when filePath already exists. New files do not require confirmation.",
+          "type": "boolean"
+        }
+      }
+    }
+  }
+]

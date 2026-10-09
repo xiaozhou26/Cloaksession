@@ -3,6 +3,7 @@ import { Check, Copy, Plug, Sparkles, Terminal } from "lucide-react";
 import type { ActivityEvent, ProfileSummary } from "../../types";
 import { Pill, Flag, ccFromTimezone } from "../atoms";
 import { formatTime } from "../../lib/relativeTime";
+import { ReverseDebugger } from "./ReverseDebugger";
 
 interface Props {
   events: ActivityEvent[];
@@ -38,6 +39,7 @@ export function McpPanel({ events, profiles, mcpUrl, mcpToken, mcpError, onSetti
         </div>
 
         <ConnectCard baseUrl={mcpUrl} token={mcpToken} error={mcpError} onSettings={onSettings} />
+        <ReverseDebugger profiles={profiles} />
 
         {/* Live feed */}
         <div className="flex items-baseline gap-2.5 mt-7 mb-2.5">

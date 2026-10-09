@@ -24,6 +24,7 @@ class BuildTests(unittest.TestCase):
             "FRONTEND": self.root / "desktop/frontend",
             "PLAYWRIGHT": self.root / "desktop/resources/playwright",
             "COMPANION": self.root / "desktop/resources/companion",
+            "REVERSE": self.root / "desktop/resources/reverse",
             "BIN": self.root / "desktop/build/bin",
             "DIST": self.root / "desktop/build/dist",
         }
@@ -32,20 +33,39 @@ class BuildTests(unittest.TestCase):
             patcher = patch.object(build, name, path)
             patcher.start()
             self.addCleanup(patcher.stop)
-        self.put("desktop/frontend/package.json", '{"version":"1.4.0"}')
-        self.put("desktop/frontend/package-lock.json", '{"version":"1.4.0","packages":{"":{"version":"1.4.0"}}}')
-        self.put("desktop/wails.json", '{"info":{"productVersion":"1.4.0"}}')
+        self.put("desktop/frontend/package.json", '{"version":"1.4.4"}')
+        self.put("desktop/frontend/package-lock.json", '{"version":"1.4.4","packages":{"":{"version":"1.4.4"}}}')
+        self.put("desktop/wails.json", '{"info":{"productVersion":"1.4.4"}}')
         self.put("desktop/go.mod", "module github.com/xiaozhou26/Cloaksession/desktop\n\nrequire github.com/wailsapp/wails/v2 v2.11.0\n")
-        self.put("desktop/service.go", 'package main\nconst appVersion = "1.4.0"\n')
+        self.put("desktop/service.go", 'package main\nconst appVersion = "1.4.4"\n')
         self.put("LICENSE", "test license")
         self.put("desktop/resources/companion/manifest.json", "{}")
         self.put("desktop/resources/companion/cs.js", "// companion")
         dependencies = {"playwright-core": "1.63.0"}
-        self.put("desktop/resources/playwright/package.json", json.dumps({"version": "1.4.0", "dependencies": dependencies}))
-        self.put("desktop/resources/playwright/package-lock.json", json.dumps({"version": "1.4.0", "packages": {
-            "": {"version": "1.4.0", "dependencies": dependencies}, "node_modules/playwright-core": {"version": "1.63.0"}}}))
+        self.put("desktop/resources/playwright/package.json", json.dumps({"version": "1.4.4", "dependencies": dependencies}))
+        self.put("desktop/resources/playwright/package-lock.json", json.dumps({"version": "1.4.4", "packages": {
+            "": {"version": "1.4.4", "dependencies": dependencies}, "node_modules/playwright-core": {"version": "1.63.0"}}}))
         for name in ("bridge.mjs", "node_modules/playwright-core/package.json"):
             self.put(f"desktop/resources/playwright/{name}", "{}")
+        reverse_dependencies = {"js-reverse-mcp": "4.0.5"}
+        upstream_dependencies = {"@zhizhuodemao/patchright": "1.61.1-mcp.2"}
+        packages = {
+            "": {"version": "1.4.4", "dependencies": reverse_dependencies},
+            "node_modules/js-reverse-mcp": {"version": "4.0.5", "dependencies": upstream_dependencies},
+            "node_modules/@zhizhuodemao/patchright": {"version": "1.61.1-mcp.2"},
+            "node_modules/@zhizhuodemao/patchright-core": {"version": "1.61.1-mcp.2"},
+            "node_modules/cloakbrowser": {"version": "0.4.13", "optional": True},
+        }
+        self.put("desktop/resources/reverse/package.json", json.dumps({"version": "1.4.4", "dependencies": reverse_dependencies}))
+        self.put("desktop/resources/reverse/package-lock.json", json.dumps({"version": "1.4.4", "packages": packages}))
+        for name, manifest in packages.items():
+            if name and not manifest.get("optional"):
+                self.put(f"desktop/resources/reverse/{name}/package.json", json.dumps(manifest))
+        self.put("desktop/resources/reverse/node_modules/js-reverse-mcp/package.json", json.dumps({
+            "version": "4.0.5", "bin": {"js-reverse-mcp": "declared/cli.js"}, "dependencies": upstream_dependencies}))
+        self.put("desktop/resources/reverse/node_modules/js-reverse-mcp/declared/cli.js", "// cli")
+        self.put("desktop/resources/reverse/bridge.mjs", "// reverse bridge")
+        self.put("desktop/resources/reverse/windows.mjs", "// window selection")
 
     def put(self, name, content):
         path = self.root / name
@@ -54,7 +74,7 @@ class BuildTests(unittest.TestCase):
         return path
 
     def test_versions_match(self):
-        self.assertEqual(build.verify_versions("v1.4.0"), "1.4.0")
+        self.assertEqual(build.verify_versions("v1.4.4"), "1.4.4")
 
     def test_wrong_tag_rejected(self):
         with self.assertRaisesRegex(RuntimeError, "Release tag"):
@@ -79,7 +99,7 @@ class BuildTests(unittest.TestCase):
             build.verify_versions()
 
     def test_stale_frontend_lock_rejected(self):
-        self.put("desktop/frontend/package-lock.json", '{"version":"1.4.0","packages":{"":{"version":"1.2.0"}}}')
+        self.put("desktop/frontend/package-lock.json", '{"version":"1.4.4","packages":{"":{"version":"1.2.0"}}}')
         with self.assertRaisesRegex(RuntimeError, "packages root"):
             build.verify_versions()
 
@@ -91,19 +111,25 @@ class BuildTests(unittest.TestCase):
     def test_linux_staging_and_archive(self):
         executable = self.put("desktop/build/bin/Cloaksession", "desktop")
         executable.chmod(0o755)
+        original_mode = executable.stat().st_mode & 0o777
         self.put("desktop/build/bin/desktop-core", "obsolete")
         self.put("desktop/build/bin/resources/chromix/stale.js", "obsolete")
         with patch.object(build.sys, "platform", "linux"), patch.object(build.platform, "machine", return_value="x86_64"):
             build.stage_runtime()
-            build.package("1.4.0", False)
+            build.package("1.4.4", False)
         self.assertFalse((build.BIN / "desktop-core").exists())
         self.assertFalse((build.BIN / "resources/chromix").exists())
-        self.assertEqual(executable.stat().st_mode & 0o777, 0o755)
-        with tarfile.open(build.DIST / "Cloaksession-1.4.0-linux-amd64.tar.gz") as archive:
+        self.assertEqual(executable.stat().st_mode & 0o777, original_mode)
+        with tarfile.open(build.DIST / "Cloaksession-1.4.4-linux-amd64.tar.gz") as archive:
             names = archive.getnames()
         self.assertNotIn("Cloaksession/desktop-core", names)
         self.assertIn("Cloaksession/resources/playwright/node_modules/playwright-core/package.json", names)
         self.assertIn("Cloaksession/resources/companion/manifest.json", names)
+        self.assertIn("Cloaksession/resources/reverse/bridge.mjs", names)
+        self.assertIn("Cloaksession/resources/reverse/windows.mjs", names)
+        self.assertIn("Cloaksession/resources/reverse/node_modules/js-reverse-mcp/declared/cli.js", names)
+        self.assertIn("Cloaksession/resources/reverse/node_modules/@zhizhuodemao/patchright-core/package.json", names)
+        self.assertNotIn("Cloaksession/resources/reverse/node_modules/cloakbrowser", names)
         self.assertIn("Cloaksession/resources/LICENSE", names)
 
     def test_windows_staging(self):
@@ -113,6 +139,7 @@ class BuildTests(unittest.TestCase):
             build.stage_runtime()
         self.assertFalse((build.BIN / "desktop-core.exe").exists())
         self.assertTrue((build.BIN / "resources/playwright/bridge.mjs").is_file())
+        self.assertTrue((build.BIN / "resources/reverse/bridge.mjs").is_file())
         self.assertTrue((build.BIN / "resources/companion/cs.js").is_file())
 
     def test_macos_staging_resigns_after_copy(self):
@@ -123,6 +150,7 @@ class BuildTests(unittest.TestCase):
         self.assertFalse((app / "Contents/MacOS/desktop-core").exists())
         self.assertTrue((app / "Contents/Resources/playwright/bridge.mjs").is_file())
         self.assertTrue((app / "Contents/Resources/companion/manifest.json").is_file())
+        self.assertTrue((app / "Contents/Resources/reverse/bridge.mjs").is_file())
         self.assertEqual(run.call_args_list[-1].args[0], ["codesign", "--verify", "--deep", "--strict", app])
 
     def test_missing_runtime_dependency_rejected(self):
@@ -160,8 +188,10 @@ class BuildTests(unittest.TestCase):
     def test_dependencies_are_reinstalled_from_lock(self):
         with patch.object(build, "run") as run:
             build.install_dependencies()
-        self.assertEqual(run.call_args_list[-1].args[0], ["npm", "ci", "--omit=dev"])
-        self.assertEqual(run.call_args_list[-1].kwargs["cwd"], build.PLAYWRIGHT)
+        self.assertEqual(run.call_args_list[-2].args[0], ["npm", "ci", "--omit=dev"])
+        self.assertEqual(run.call_args_list[-2].kwargs["cwd"], build.PLAYWRIGHT)
+        self.assertEqual(run.call_args_list[-1].args[0], ["npm", "ci", "--omit=dev", "--omit=optional"])
+        self.assertEqual(run.call_args_list[-1].kwargs["cwd"], build.REVERSE)
 
     def test_universal_build_targets_go_only(self):
         self.put("desktop/icons/icon.png", "png")
@@ -189,6 +219,7 @@ class BuildTests(unittest.TestCase):
         run.assert_called_once_with(["npm", "run", "build"], cwd=build.FRONTEND)
         self.assertFalse((build.BIN / "desktop-core").exists())
         self.assertTrue((build.BIN.parent / "Resources/playwright/bridge.mjs").is_file())
+        self.assertTrue((build.BIN.parent / "Resources/reverse/bridge.mjs").is_file())
         self.assertTrue((build.DESKTOP / "build/appicon.png").is_file())
 
     def test_optional_go_race_tests_use_linux_webkit_tag(self):
@@ -202,6 +233,7 @@ class BuildTests(unittest.TestCase):
         commands = [call.args[0] for call in run.call_args_list]
         self.assertEqual(commands[1], ["go", "test", "-race", "-count=1", "-mod=readonly", "-tags", "webkit2_41", "./..."])
         self.assertTrue((build.BIN / "resources/playwright/bridge.mjs").is_file())
+        self.assertTrue((build.BIN / "resources/reverse/bridge.mjs").is_file())
 
     def test_stale_runtime_lock_version_rejected(self):
         path = build.PLAYWRIGHT / "package-lock.json"
@@ -211,14 +243,85 @@ class BuildTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "resources/playwright/package-lock.json packages root"):
             build.verify_versions()
 
+    def test_reverse_versions_must_match_application(self):
+        for filename, key in (("package.json", "version"), ("package-lock.json", "version"),
+                              ("package-lock.json", "root")):
+            with self.subTest(filename=filename, key=key):
+                path = build.REVERSE / filename
+                original = path.read_text()
+                manifest = json.loads(original)
+                target = manifest["packages"][""] if key == "root" else manifest
+                target["version"] = "1.3.0"
+                path.write_text(json.dumps(manifest))
+                with self.assertRaisesRegex(RuntimeError, "resources/reverse/"):
+                    build.verify_versions()
+                path.write_text(original)
+
+    def test_reverse_rejects_changed_upstream_pins(self):
+        path = build.REVERSE / "package-lock.json"
+        original = path.read_text()
+        for name in ("js-reverse-mcp", "@zhizhuodemao/patchright", "@zhizhuodemao/patchright-core"):
+            with self.subTest(name=name):
+                lock = json.loads(original)
+                lock["packages"][f"node_modules/{name}"]["version"] = "0.0.0"
+                path.write_text(json.dumps(lock))
+                with self.assertRaisesRegex(RuntimeError, "must pin"):
+                    build.verify_reverse_manifest()
+        path.write_text(original)
+
+    def test_reverse_rejects_unpinned_manifest(self):
+        path = build.REVERSE / "package.json"
+        manifest = build.read_json(path)
+        manifest["dependencies"]["js-reverse-mcp"] = "^4.0.5"
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(RuntimeError, "must depend only"):
+            build.verify_reverse_manifest()
+
+    def test_reverse_rejects_optional_and_stale_installed_packages(self):
+        for name in ("cloakbrowser", "stale", "@unexpected/stale"):
+            with self.subTest(name=name):
+                path = self.put(f"desktop/resources/reverse/node_modules/{name}/package.json", "{}")
+                with self.assertRaisesRegex(RuntimeError, "Unexpected reverse dependency"):
+                    build.stage_reverse_resources(build.BIN / "resources/reverse")
+                path.unlink()
+                path.parent.rmdir()
+
+    def test_reverse_rejects_missing_or_wrong_installed_dependency(self):
+        path = build.REVERSE / "node_modules/@zhizhuodemao/patchright-core/package.json"
+        path.unlink()
+        with self.assertRaisesRegex(RuntimeError, "Missing packaged reverse dependency"):
+            build.stage_reverse_resources(build.BIN / "resources/reverse")
+        path.write_text('{"version":"0.0.0"}')
+        with self.assertRaisesRegex(RuntimeError, "does not match lock"):
+            build.stage_reverse_resources(build.BIN / "resources/reverse")
+
+    def test_reverse_requires_declared_cli_and_bridge(self):
+        entry = build.REVERSE / "node_modules/js-reverse-mcp/declared/cli.js"
+        entry.unlink()
+        with self.assertRaisesRegex(RuntimeError, "CLI bin"):
+            build.stage_reverse_resources(build.BIN / "resources/reverse")
+        (build.REVERSE / "bridge.mjs").unlink()
+        with self.assertRaisesRegex(RuntimeError, "Missing packaged reverse resource"):
+            build.stage_reverse_resources(build.BIN / "resources/reverse")
+
+    def test_reverse_staging_cleans_destination_and_excludes_tests(self):
+        self.put("desktop/resources/reverse/test/fixture.mjs", "// test")
+        self.put("desktop/build/bin/resources/reverse/stale.js", "// stale")
+        destination = build.BIN / "resources/reverse"
+        build.stage_reverse_resources(destination)
+        self.assertFalse((destination / "test").exists())
+        self.assertFalse((destination / "stale.js").exists())
+        self.assertTrue((destination / "node_modules/js-reverse-mcp/declared/cli.js").is_file())
+        self.assertTrue((destination / "package-lock.json").is_file())
+
     def test_windows_installer_payload_and_update_suffix(self):
         def fake_run(command):
             output = next(value.removeprefix("/DOUTPUT=") for value in command if value.startswith("/DOUTPUT="))
             Path(output).write_bytes(b"installer")
         with patch.object(build.sys, "platform", "win32"), patch.object(build.platform, "machine", return_value="AMD64"), \
                 patch.object(build, "find_makensis", return_value="makensis"), patch.object(build, "run", side_effect=fake_run) as run:
-            build.package("1.4.0", False)
-        self.assertTrue((build.DIST / "Cloaksession-1.4.0-windows-amd64-setup.exe").is_file())
+            build.package("1.4.4", False)
+        self.assertTrue((build.DIST / "Cloaksession-1.4.4-windows-amd64-setup.exe").is_file())
         self.assertIn(f"/DPAYLOAD={build.BIN}", run.call_args.args[0])
 
 

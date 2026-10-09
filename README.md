@@ -7,6 +7,10 @@ Cloaksession 是一个基于 **Wails v2（Go）+ React** 的桌面浏览器环�
 - 源码：[xiaozhou26/Cloaksession](https://github.com/xiaozhou26/Cloaksession)
 - 下载：[GitHub Releases](https://github.com/xiaozhou26/Cloaksession/releases)（以实际发布附件为准）
 
+## 逆向调试
+
+MCP 页面新增 **Reverse debugging**：连接运行中的 Profile，选择窗口、标签页和 iframe，通过固定版本 `js-reverse-mcp` / Patchright 使用脚本检索、断点、单步、HTTP 和 WebSocket 分析。每次连接返回独立 `debugSessionId`；断开调试保留浏览器运行。使用步骤、工具和构建验证见 [逆向调试说明](docs/REVERSE-DEBUGGING.md)。
+
 ## 功能范围与迁移状态
 
 **1.4.0 正在迁移为全 Go 后端**：Wails 主程序直接提供存储、浏览器、MCP、扩展和归档服务，不再启动 Rust 核心进程。下列是保留的功能范围；纯 Go 实现及最终安装包的通过情况以 [验收记录](docs/ACCEPTANCE.md) 为准，旧版验证不能替代本次回归。

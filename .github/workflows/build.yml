@@ -33,6 +33,7 @@ jobs:
           cache-dependency-path: |
             desktop/frontend/package-lock.json
             desktop/resources/playwright/package-lock.json
+            desktop/resources/reverse/package-lock.json
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.12'
@@ -49,6 +50,12 @@ jobs:
       - name: Install direct Playwright bridge dependencies
         working-directory: desktop/resources/playwright
         run: npm ci
+      - name: Install reverse MCP dependencies without optional browsers
+        working-directory: desktop/resources/reverse
+        run: npm ci --omit=dev --omit=optional
+      - name: Test reverse bridge and real MCP tools list (no browser)
+        working-directory: desktop/resources/reverse
+        run: npm test
       - name: Test build and packaging helpers
         run: python -m unittest discover -s scripts -p 'test_*.py'
       - name: Test direct Playwright browser bridge
@@ -72,6 +79,12 @@ jobs:
           export CLOAKSESSION_TEST_BROWSER="$(command -v google-chrome)"
           test -x "$CLOAKSESSION_TEST_BROWSER"
           go test -race -count=1 -mod=readonly -v -run '^TestServiceRealBrowser$' .
+      - name: Test reverse debugger against real Chrome
+        working-directory: desktop
+        run: |
+          export CLOAKSESSION_TEST_REVERSE_BROWSER="$(command -v google-chrome)"
+          test -x "$CLOAKSESSION_TEST_REVERSE_BROWSER"
+          go test -race -count=1 -mod=readonly -v -run '^TestReverseIntegration$' .
       - name: Test frontend in Chromium
         working-directory: desktop/frontend
         run: npx playwright test --config playwright.config.ts
@@ -104,6 +117,7 @@ jobs:
           cache-dependency-path: |
             desktop/frontend/package-lock.json
             desktop/resources/playwright/package-lock.json
+            desktop/resources/reverse/package-lock.json
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.12'

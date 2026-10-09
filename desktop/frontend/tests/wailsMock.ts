@@ -140,6 +140,7 @@ export async function installWailsMock(
               running.delete(args.id);
               mock.emit("profiles:running-changed", { kind: "closed", profileId: args.id, reason: "user-close" });
               return null;
+            case "debugger_sessions": return { sessions: [] };
             case "activity_recent": return [];
             case "update_status":
             case "update_check": return { kind: "idle" };

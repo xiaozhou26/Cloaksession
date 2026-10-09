@@ -8,11 +8,17 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/xiaozhou26/Cloaksession/desktop/internal/debugger"
 )
 
 func TestCatalog(t *testing.T) {
 	_, h := testHTTP(t, nil, nil)
 	expected := []string{"list_profiles", "launch_profile", "close_profile", "navigate", "click", "type", "extract", "screenshot", "create_profile", "update_profile", "delete_profile", "list_fingerprint_options", "evaluate_js", "wait_for_selector", "list_tabs", "activate_tab", "close_tab", "wait_for_navigation", "wait_for_load", "cdp_send", "get_cookies", "set_cookies", "new_tab"}
+	expected = append(expected, "attach_debug_session", "detach_debug_session", "list_browser_sessions", "list_windows")
+	for _, tool := range debugger.Definitions() {
+		expected = append(expected, tool.Name)
+	}
 	for _, env := range []string{"", "0", "false", "TRUE", "1", "true", "yes", "on"} {
 		t.Run(env, func(t *testing.T) {
 			t.Setenv("MULTIZEN_MCP_ALLOW_RAW_CDP", env)
@@ -29,7 +35,11 @@ func TestCatalog(t *testing.T) {
 				if schema["type"] != "object" {
 					t.Fatal(schema)
 				}
-				if name != "list_profiles" && name != "create_profile" && name != "list_fingerprint_options" {
+				if debugger.IsTool(name) || name == "detach_debug_session" || name == "list_windows" {
+					if schema["required"].([]any)[0] != "debugSessionId" {
+						t.Fatalf("%s missing explicit session routing", name)
+					}
+				} else if name != "list_profiles" && name != "create_profile" && name != "list_fingerprint_options" && name != "list_browser_sessions" {
 					if schema["required"].([]any)[0] != "profileId" {
 						t.Fatalf("%s missing profileId", name)
 					}

@@ -14,12 +14,13 @@ import (
 	"time"
 
 	"github.com/xiaozhou26/Cloaksession/desktop/internal/browser"
+	"github.com/xiaozhou26/Cloaksession/desktop/internal/debugger"
 	"github.com/xiaozhou26/Cloaksession/desktop/internal/extensions"
 	"github.com/xiaozhou26/Cloaksession/desktop/internal/mcp"
 	"github.com/xiaozhou26/Cloaksession/desktop/internal/store"
 )
 
-const appVersion = "1.4.4"
+const appVersion = "1.5.0"
 
 //go:embed resources/companion/*
 var companionAssets embed.FS
@@ -39,6 +40,7 @@ type dialogRequest struct {
 type Service struct {
 	store        *store.Store
 	browser      *browser.Manager
+	debugger     *debugger.Manager
 	extensions   *extensions.Manager
 	mcp          *mcp.Server
 	update       *updater
@@ -97,7 +99,15 @@ func newService(dataDir, resourceDir string, dialog func(dialogRequest) (string,
 			return nil, err
 		}
 	}
-	s.browser = browser.New(resourceDir, emit)
+	s.browser = browser.New(resourceDir, func(event string, payload any) {
+		if event == "profiles:running-changed" {
+			if data, ok := payload.(map[string]any); ok && data["kind"] == "closed" && s.debugger != nil {
+				s.debugger.CloseProfile(text(data["profileId"]))
+			}
+		}
+		emit(event, payload)
+	})
+	s.debugger = debugger.New(resourceDir, dataDir, s.browser.Endpoint, emit)
 	s.extensions = extensions.New(dataDir, s.store)
 	if err := s.extensions.SweepOrphans(); err != nil {
 		fmt.Fprintf(os.Stderr, "extension cleanup: %v\n", err)
@@ -147,6 +157,9 @@ func (s *Service) Close() {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			_ = s.mcp.Close(ctx)
 			cancel()
+		}
+		if s.debugger != nil {
+			s.debugger.Close()
 		}
 		if s.browser != nil {
 			s.browser.Shutdown()
@@ -217,6 +230,7 @@ func (s *Service) Invoke(ctx context.Context, command string, args map[string]an
 	case "profiles_delete":
 		id := text(args["id"])
 		s.stopCompanion(id)
+		s.debugger.CloseProfile(id)
 		if err := s.browser.CloseProfile(id); err != nil {
 			return nil, err
 		}
@@ -238,7 +252,49 @@ func (s *Service) Invoke(ctx context.Context, command string, args map[string]an
 		return result, err
 	case "profiles_close":
 		s.stopCompanion(text(args["id"]))
+		s.debugger.CloseProfile(text(args["id"]))
 		return nil, s.browser.CloseProfile(text(args["id"]))
+	case "debugger_attach", "attach_debug_session":
+		// The debugger tracks pending attaches so profile close can cancel them.
+		profileID := text(args["profileId"])
+		profile, err := s.store.ProfileGet(profileID)
+		if err != nil {
+			return nil, err
+		}
+		if profile == nil {
+			return nil, fmt.Errorf("profile not found: %s", profileID)
+		}
+		nodePath := text(args["nodePath"])
+		if nodePath == "" {
+			settings, err := s.store.SettingsGet()
+			if err != nil {
+				return nil, err
+			}
+			if config, ok := settings["debugger"].(map[string]any); ok {
+				nodePath = text(config["nodePath"])
+			}
+			if nodePath == "" {
+				if config, ok := settings["chromix"].(map[string]any); ok {
+					nodePath = text(config["nodePath"])
+				}
+			}
+		}
+		return s.debugger.Attach(ctx, profileID, nodePath)
+	case "debugger_detach", "detach_debug_session":
+		err := s.debugger.Detach(text(args["debugSessionId"]))
+		return map[string]any{"detached": err == nil}, err
+	case "debugger_sessions", "list_browser_sessions":
+		return map[string]any{"sessions": s.debugger.Sessions()}, nil
+	case "debugger_windows", "list_windows":
+		return s.debugger.Windows(ctx, text(args["debugSessionId"]))
+	case "debugger_tools":
+		return map[string]any{"tools": debugger.Definitions()}, nil
+	case "debugger_call":
+		arguments, err := objectArg(args, "arguments")
+		if err != nil {
+			return nil, err
+		}
+		return s.debugger.Call(ctx, text(args["debugSessionId"]), text(args["name"]), arguments)
 	case "settings_get":
 		return s.store.SettingsGet()
 	case "settings_update":
@@ -326,6 +382,9 @@ func (s *Service) Invoke(ctx context.Context, command string, args map[string]an
 	case "update_download":
 		return nil, s.update.downloadPage(text(args["version"]))
 	default:
+		if debugger.IsTool(command) {
+			return s.debugger.Call(ctx, text(args["debugSessionId"]), command, args)
+		}
 		return s.browser.Tool(ctx, command, args)
 	}
 }
@@ -527,6 +586,7 @@ func (s *Service) startCompanion(id string) {
 				unlock()
 				return
 			}
+			s.debugger.CloseProfile(id)
 			if err = s.browser.CloseProfile(id); err == nil && ctx.Err() == nil {
 				var profile map[string]any
 				profile, err = s.store.ProfileGet(id)

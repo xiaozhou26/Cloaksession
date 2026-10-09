@@ -146,3 +146,22 @@ func TestRequestContext(t *testing.T) {
 		t.Fatal("canceled request reached backend")
 	}
 }
+
+func TestReverseActivityReportsUpstreamFailureWithoutEvidence(t *testing.T) {
+	s := New(backendFunc(func(context.Context, string, map[string]any) (any, error) {
+		return map[string]any{"isError": true, "content": []any{map[string]any{"type": "text", "text": "private-page-evidence"}}, "structuredContent": map[string]any{"ok": false}}, nil
+	}), "token", nil)
+	tool, _ := lookupTool("list_scripts")
+	result, err := s.callTool(context.Background(), tool, map[string]any{"debugSessionId": "s"})
+	if err != nil || result.(map[string]any)["isError"] != true {
+		t.Fatal(result, err)
+	}
+	event := s.Recent(1)[0]
+	if event["status"] != "error" {
+		t.Fatalf("upstream failure recorded as success: %v", event)
+	}
+	data, _ := json.Marshal(event)
+	if strings.Contains(string(data), "private-page-evidence") {
+		t.Fatal("reverse evidence retained in activity feed")
+	}
+}

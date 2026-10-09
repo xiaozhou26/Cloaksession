@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/xiaozhou26/Cloaksession/desktop/internal/debugger"
 )
 
 // Backend uses desktop IPC commands for profiles and MCP tool names for browser operations.
@@ -91,6 +93,13 @@ func selectFields(value map[string]any, fields ...string) map[string]any {
 }
 
 func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]any) (any, error) {
+	if debugger.IsTool(name) || name == "list_windows" || name == "detach_debug_session" || name == "list_browser_sessions" {
+		return s.invoke(ctx, name, args)
+	}
+	if name == "attach_debug_session" {
+		// Runtime paths are local settings, never supplied by an MCP caller.
+		return s.invoke(ctx, name, map[string]any{"profileId": args["profileId"]})
+	}
 	id, _ := args["profileId"].(string)
 	idArgs := map[string]any{"id": id}
 	switch name {

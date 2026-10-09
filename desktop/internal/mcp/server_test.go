@@ -166,10 +166,10 @@ func TestRPCProtocol(t *testing.T) {
 		{`{`, -32700}, {`{} {}`, -32700}, {`null`, -32600}, {`[]`, -32600}, {`42`, -32600},
 		{`{"jsonrpc":"1.0","method":"ping"}`, -32600}, {`{"jsonrpc":"2.0"}`, -32600},
 		{`{"jsonrpc":"2.0","method":"ping","id":{}}`, -32600},
-		{`{"jsonrpc":"2.0","method":"missing"}`, -32601},
-		{`{"jsonrpc":"2.0","method":"tools/call"}`, -32602},
-		{`{"jsonrpc":"2.0","method":"tools/call","params":{"name":42}}`, -32602},
-		{`{"jsonrpc":"2.0","method":"tools/call","params":{"name":"does_not_exist"}}`, -32602},
+		{`{"jsonrpc":"2.0","id":1,"method":"missing"}`, -32601},
+		{`{"jsonrpc":"2.0","id":1,"method":"tools/call"}`, -32602},
+		{`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":42}}`, -32602},
+		{`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"does_not_exist"}}`, -32602},
 	} {
 		status, body := request(t, h, "POST", "/mcp", "", "Bearer test-token", tc.body)
 		var response map[string]any
@@ -182,9 +182,9 @@ func TestRPCProtocol(t *testing.T) {
 	if !bytes.Contains(data, []byte(`9007199254740993`)) {
 		t.Fatalf("rounded id: %s", data)
 	}
-	_, data = request(t, h, "POST", "/mcp", "", "Bearer test-token", `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	if !bytes.Contains(data, []byte(`"id":null`)) {
-		t.Fatalf("notification compatibility: %s", data)
+	status, data := request(t, h, "POST", "/mcp", "", "Bearer test-token", `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	if status != http.StatusAccepted || len(data) != 0 {
+		t.Fatalf("notification response: %d %s", status, data)
 	}
 }
 

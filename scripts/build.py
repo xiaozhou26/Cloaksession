@@ -17,6 +17,9 @@ DESKTOP = ROOT / "desktop"
 FRONTEND = DESKTOP / "frontend"
 PLAYWRIGHT = DESKTOP / "resources/playwright"
 COMPANION = DESKTOP / "resources/companion"
+REVERSE = DESKTOP / "resources/reverse"
+REVERSE_VERSION = "4.0.5"
+PATCHRIGHT_VERSION = "1.61.1-mcp.2"
 BIN = DESKTOP / "build/bin"
 DIST = DESKTOP / "build/dist"
 WAILS_VERSION = "v2.11.0"
@@ -56,6 +59,9 @@ def verify_versions(tag=None):
         "resources/playwright/package.json": read_json(PLAYWRIGHT / "package.json")["version"],
         "resources/playwright/package-lock.json": read_json(PLAYWRIGHT / "package-lock.json")["version"],
         "resources/playwright/package-lock.json packages root": read_json(PLAYWRIGHT / "package-lock.json")["packages"][""]["version"],
+        "resources/reverse/package.json": read_json(REVERSE / "package.json")["version"],
+        "resources/reverse/package-lock.json": read_json(REVERSE / "package-lock.json")["version"],
+        "resources/reverse/package-lock.json packages root": read_json(REVERSE / "package-lock.json")["packages"][""]["version"],
     }
     for source, actual in versions.items():
         if actual != version:
@@ -84,10 +90,33 @@ def verify_runtime_manifest():
         raise RuntimeError("Browser bridge manifest and lock dependencies do not match")
 
 
+def verify_reverse_manifest():
+    manifest = read_json(REVERSE / "package.json")
+    packages = read_json(REVERSE / "package-lock.json").get("packages", {})
+    dependencies = {"js-reverse-mcp": REVERSE_VERSION}
+    if manifest.get("dependencies") != dependencies or manifest.get("devDependencies"):
+        raise RuntimeError(f"Reverse bridge must depend only on js-reverse-mcp {REVERSE_VERSION}")
+    if packages.get("", {}).get("dependencies") != dependencies:
+        raise RuntimeError("Reverse bridge manifest and lock dependencies do not match")
+    expected = {
+        "js-reverse-mcp": REVERSE_VERSION,
+        "@zhizhuodemao/patchright": PATCHRIGHT_VERSION,
+        "@zhizhuodemao/patchright-core": PATCHRIGHT_VERSION,
+    }
+    for name, version in expected.items():
+        if packages.get(f"node_modules/{name}", {}).get("version") != version:
+            raise RuntimeError(f"Reverse bridge lock must pin {name} {version}")
+    upstream = packages["node_modules/js-reverse-mcp"].get("dependencies", {})
+    if upstream.get("@zhizhuodemao/patchright") != PATCHRIGHT_VERSION:
+        raise RuntimeError("Reverse bridge must use the upstream dedicated patchright pin")
+
+
 def install_dependencies():
     verify_runtime_manifest()
+    verify_reverse_manifest()
     run(["npm", "ci", "--legacy-peer-deps"], cwd=FRONTEND)
     run(["npm", "ci", "--omit=dev"], cwd=PLAYWRIGHT)
+    run(["npm", "ci", "--omit=dev", "--omit=optional"], cwd=REVERSE)
 
 
 def replace_tree(source, destination):
@@ -114,8 +143,59 @@ def stage_browser_resources(destination):
     replace_tree(PLAYWRIGHT / "node_modules", destination / "node_modules")
 
 
+def stage_reverse_resources(destination):
+    verify_reverse_manifest()
+    for name in ("bridge.mjs", "windows.mjs", "package.json", "package-lock.json"):
+        if not (REVERSE / name).is_file():
+            raise RuntimeError(f"Missing packaged reverse resource: {name}")
+    packages = read_json(REVERSE / "package-lock.json")["packages"]
+    for name, package in packages.items():
+        if not name:
+            continue
+        installed = REVERSE / name
+        if package.get("optional") or package.get("dev"):
+            if installed.exists():
+                raise RuntimeError(f"Unexpected reverse dependency {name}; run npm ci --omit=dev --omit=optional")
+            continue
+        manifest = installed / "package.json"
+        if not manifest.is_file():
+            raise RuntimeError(f"Missing packaged reverse dependency: {name}")
+        if read_json(manifest).get("version") != package["version"]:
+            raise RuntimeError(f"Installed reverse dependency does not match lock: {name}")
+    modules = REVERSE / "node_modules"
+    pending = [modules]
+    while pending:
+        current = pending.pop()
+        for path in current.iterdir():
+            if path.name.startswith("."):
+                continue
+            if path.name.startswith("@"):
+                pending.append(path)
+                continue
+            if path.relative_to(REVERSE).as_posix() not in packages:
+                raise RuntimeError(f"Unexpected reverse dependency {path.name}; run npm ci --omit=dev --omit=optional")
+            if (path / "node_modules").is_dir():
+                pending.append(path / "node_modules")
+    upstream_dir = modules / "js-reverse-mcp"
+    upstream = read_json(upstream_dir / "package.json")
+    declared_bin = upstream.get("bin")
+    entry = declared_bin.get("js-reverse-mcp") if isinstance(declared_bin, dict) else declared_bin
+    if not isinstance(entry, str) or not entry:
+        raise RuntimeError("Reverse package must declare its CLI bin")
+    entry_path = (upstream_dir / entry).resolve()
+    if not entry_path.is_relative_to(upstream_dir.resolve()) or not entry_path.is_file():
+        raise RuntimeError("Missing or invalid packaged reverse CLI bin")
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True)
+    for name in ("bridge.mjs", "windows.mjs", "package.json", "package-lock.json"):
+        shutil.copy2(REVERSE / name, destination / name)
+    replace_tree(modules, destination / "node_modules")
+
+
 def stage_resources(resources):
     stage_browser_resources(resources / "playwright")
+    stage_reverse_resources(resources / "reverse")
     for name in ("manifest.json", "cs.js"):
         if not (COMPANION / name).is_file():
             raise RuntimeError(f"Missing companion resource: {name}")
@@ -197,6 +277,7 @@ def main():
         parser.error("--prepare and --package are mutually exclusive")
     version = verify_versions(args.tag)
     verify_runtime_manifest()
+    verify_reverse_manifest()
     if args.check_version:
         return
     install_dependencies()

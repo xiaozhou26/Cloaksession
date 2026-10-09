@@ -108,6 +108,13 @@ func (s *Server) finishActivity(id string, started time.Time, result any, err er
 	status, summary := "ok", "completed"
 	if err != nil {
 		status, summary = "error", errorCode(err)
+	} else if payload, ok := result.(map[string]any); ok && payload["content"] != nil && payload["structuredContent"] != nil {
+		// Debug evidence stays in the tool response, outside the shared activity feed.
+		if payload["isError"] == true {
+			status, summary = "error", "debug tool failed"
+		} else {
+			summary = "debug tool completed"
+		}
 	} else if data, marshalErr := json.Marshal(sanitize(result)); marshalErr == nil {
 		runes := []rune(string(data))
 		if len(runes) > 1024 {

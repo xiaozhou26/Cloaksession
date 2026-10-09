@@ -4,8 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"sort"
 	"strconv"
+	"strings"
+
+	"github.com/xiaozhou26/Cloaksession/desktop/internal/debugger"
 )
 
 type tool struct {
@@ -58,7 +62,7 @@ func catalog() []tool {
 	}
 	timeout := map[string]any{"type": "integer", "minimum": 0, "maximum": uint64(math.MaxUint64)}
 	selectorTimeout := map[string]any{"type": "integer", "minimum": 0, "maximum": uint64(math.MaxUint64), "default": 30000}
-	return []tool{
+	tools := []tool{
 		{"list_profiles", "List local browser profiles and their running state.", object(map[string]any{})},
 		{"launch_profile", "Launch a browser profile.", profile(nil)},
 		{"close_profile", "Close a browser profile.", profile(nil)},
@@ -83,6 +87,16 @@ func catalog() []tool {
 		{"set_cookies", "Set cookies through the controlled browser session.", profile(map[string]any{"cookies": array(map[string]any{}), "sessionId": optional(stringSchema())}, "cookies")},
 		{"new_tab", "Open a new tab in a running profile.", profile(map[string]any{"url": stringSchema()}, "url")},
 	}
+	tools = append(tools,
+		tool{"attach_debug_session", "Attach an isolated debugger to an already running managed profile.", profile(nil)},
+		tool{"detach_debug_session", "Detach the debugger without closing the browser.", object(map[string]any{"debugSessionId": stringSchema()}, "debugSessionId")},
+		tool{"list_browser_sessions", "List attached or failed debug sessions for managed profiles.", object(map[string]any{})},
+		tool{"list_windows", "List pages in the explicitly selected debug session.", object(map[string]any{"debugSessionId": stringSchema()}, "debugSessionId")},
+	)
+	for _, t := range debugger.Definitions() {
+		tools = append(tools, tool{t.Name, t.Description, t.InputSchema})
+	}
+	return tools
 }
 
 func toolDefinitions() []map[string]any {
@@ -116,6 +130,18 @@ func validate(value any, schema map[string]any, path string) error {
 		}
 		return fmt.Errorf("%s has an invalid type", path)
 	}
+	if choices, ok := schema["enum"].([]any); ok {
+		found := false
+		for _, choice := range choices {
+			if fmt.Sprint(value) == fmt.Sprint(choice) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("%s must be an allowed value", path)
+		}
+	}
 	bad := func() error { return fmt.Errorf("%s must be %s", path, schema["type"]) }
 	switch schema["type"] {
 	case "null":
@@ -126,36 +152,47 @@ func validate(value any, schema map[string]any, path string) error {
 		if _, ok := value.(string); !ok {
 			return bad()
 		}
-	case "integer":
-		var n uint64
+	case "boolean":
+		if _, ok := value.(bool); !ok {
+			return bad()
+		}
+	case "number", "integer":
+		var text string
 		switch v := value.(type) {
 		case json.Number:
-			var err error
-			n, err = strconv.ParseUint(string(v), 10, 64)
-			if err != nil {
+			if schema["type"] == "integer" && strings.ContainsAny(string(v), ".eE") {
 				return bad()
 			}
+			text = string(v)
 		case float64:
-			if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v >= float64(math.MaxUint64) || v != math.Trunc(v) {
+			if math.IsNaN(v) || math.IsInf(v, 0) {
 				return bad()
 			}
-			n = uint64(v)
+			text = strconv.FormatFloat(v, 'f', -1, 64)
 		case int:
-			if v < 0 {
-				return bad()
-			}
-			n = uint64(v)
+			text = strconv.Itoa(v)
 		default:
 			return bad()
 		}
-		if min, ok := schema["minimum"].(int); ok && n < uint64(min) {
+		numeric, parseErr := strconv.ParseFloat(text, 64)
+		if len(text) > 64 || parseErr != nil || math.IsNaN(numeric) || math.IsInf(numeric, 0) {
 			return bad()
 		}
-		if max, ok := schema["maximum"].(int); ok && n > uint64(max) {
+		n, ok := new(big.Rat).SetString(text)
+		if !ok || schema["type"] == "integer" && !n.IsInt() {
 			return bad()
 		}
-		if max, ok := schema["maximum"].(uint64); ok && n > max {
-			return bad()
+		for _, bound := range []string{"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"} {
+			if raw, exists := schema[bound]; exists {
+				limit, ok := new(big.Rat).SetString(fmt.Sprint(raw))
+				if !ok {
+					continue
+				}
+				cmp := n.Cmp(limit)
+				if bound == "minimum" && cmp < 0 || bound == "maximum" && cmp > 0 || bound == "exclusiveMinimum" && cmp <= 0 || bound == "exclusiveMaximum" && cmp >= 0 {
+					return bad()
+				}
+			}
 		}
 	case "array":
 		values, ok := value.([]any)

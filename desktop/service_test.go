@@ -266,3 +266,55 @@ func TestDataDirectoryOverride(t *testing.T) {
 		t.Fatalf("%s %v", actual, err)
 	}
 }
+
+func TestServiceDebuggerBoundary(t *testing.T) {
+	s := testService(t)
+	for _, command := range []string{"debugger_sessions", "list_browser_sessions"} {
+		result := invoke(t, s, command, nil)
+		data, err := json.Marshal(result)
+		if err != nil || string(data) != `{"sessions":[]}` {
+			t.Fatalf("%s: %s %v", command, data, err)
+		}
+	}
+	tools := invoke(t, s, "debugger_tools", nil)
+	data, err := json.Marshal(tools)
+	if err != nil || !strings.Contains(string(data), `"debugSessionId"`) {
+		t.Fatalf("%s %v", data, err)
+	}
+	created := invoke(t, s, "profiles_create", map[string]any{"input": map[string]any{"name": "Closed debug profile"}}).(map[string]any)
+	for _, command := range []string{"debugger_attach", "attach_debug_session"} {
+		for _, id := range []string{"missing", text(created["id"])} {
+			if _, err := s.Invoke(context.Background(), command, map[string]any{"profileId": id, "endpoint": "http://127.0.0.1:9222"}); err == nil {
+				t.Fatalf("%s accepted closed/unmanaged profile %s", command, id)
+			}
+		}
+	}
+	for _, command := range []string{"debugger_detach", "debugger_windows", "list_windows", "list_scripts"} {
+		if _, err := s.Invoke(context.Background(), command, nil); err == nil {
+			t.Fatalf("%s accepted implicit session", command)
+		}
+	}
+	if _, err := s.Invoke(context.Background(), "debugger_call", map[string]any{"name": "list_scripts", "arguments": map[string]any{}}); err == nil {
+		t.Fatal("generic call accepted implicit session")
+	}
+}
+
+func TestDebugAttachDoesNotWaitForProfileOperationLock(t *testing.T) {
+	s := testService(t)
+	p := invoke(t, s, "profiles_create", map[string]any{"input": map[string]any{"name": "locked profile"}}).(map[string]any)
+	id := text(p["id"])
+	unlock := s.lockProfile(id)
+	defer unlock()
+	done := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	go func() { _, err := s.Invoke(ctx, "debugger_attach", map[string]any{"profileId": id}); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("closed browser attached")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("debug attach waited on the profile operation lock")
+	}
+}
